@@ -1,0 +1,152 @@
+{% extends 'base.html' %}
+{% block title %}Users | Busta IM{% endblock %}
+{% block content %}
+<div class="row g-3">
+  <div class="col-12 col-xl-4">
+    <div class="card card-soft">
+      <div class="card-body">
+        <h2 class="h5">Add User</h2>
+        <form method="post" class="vstack gap-2">
+          {% csrf_token %}
+          <div>
+            <label class="form-label">Username</label>
+            {{ form.username }}
+            {% for error in form.username.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div>
+            <label class="form-label">First Name</label>
+            {{ form.first_name }}
+          </div>
+          <div>
+            <label class="form-label">Last Name</label>
+            {{ form.last_name }}
+          </div>
+          <div>
+            <label class="form-label">Role</label>
+            {{ form.role }}
+          </div>
+          <div>
+            <label class="form-label">Password</label>
+            {{ form.password }}
+            {% for error in form.password.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          {% if form.non_field_errors %}
+            <div class="text-danger small">{{ form.non_field_errors|join:', ' }}</div>
+          {% endif %}
+          <button type="submit" class="btn btn-primary">Create User</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <div class="card card-soft mb-3">
+      <div class="card-body">
+        <h2 class="h5">Transaction History Downloads</h2>
+        <div class="d-flex flex-wrap gap-2">
+          {% for export in transaction_exports %}
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'accounts:download_transactions' export.key %}">
+              Download {{ export.label }}
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card card-soft">
+      <div class="card-body">
+        <h2 class="h5">User List</h2>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Username</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for user in users %}
+                <tr>
+                  <td>{{ user.id }}</td>
+                  <td>{{ user.username }}</td>
+                  <td>{{ user.get_full_name|default:'-' }}</td>
+                  <td>{{ user.get_role_display }}</td>
+                  <td>{% if user.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Inactive</span>{% endif %}</td>
+                  <td>
+                    <div class="d-flex flex-wrap gap-1 align-items-center">
+                      {% if user.is_active %}
+                        <form method="post" action="{% url 'accounts:deactivate_user' user.id %}" class="d-inline">
+                          {% csrf_token %}
+                          <button class="btn btn-sm btn-outline-danger" type="submit" {% if user.id == request.user.id %}disabled{% endif %}>Deactivate</button>
+                        </form>
+                      {% endif %}
+                      <form
+                        method="post"
+                        action="{% url 'accounts:delete_user' user.id %}"
+                        class="d-inline"
+                        onsubmit="return confirm('Delete this user permanently? This cannot be undone.');"
+                      >
+                        {% csrf_token %}
+                        <button class="btn btn-sm btn-danger" type="submit" {% if user.id == request.user.id %}disabled{% endif %}>Delete</button>
+                      </form>
+                      {% if user.id == request.user.id %}
+                        <span class="text-muted small">Current user</span>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="6">No users found.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card card-soft mt-3">
+      <div class="card-body">
+        <h2 class="h5">Recent Transactions</h2>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>User</th>
+                <th>Action</th>
+                <th>App</th>
+                <th>Table</th>
+                <th>Record</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for tx in recent_transactions %}
+                <tr>
+                  <td>{{ tx.created_at|date:"Y-m-d H:i:s" }}</td>
+                  <td>
+                    {% if tx.actor_username %}
+                      {{ tx.actor_username }}{% if tx.actor_role %} ({{ tx.actor_role }}){% endif %}
+                    {% else %}
+                      System
+                    {% endif %}
+                  </td>
+                  <td>{{ tx.action|title }}</td>
+                  <td>{{ tx.app_label }}</td>
+                  <td>{{ tx.table_name }}</td>
+                  <td>{{ tx.model_name }}#{{ tx.object_pk }}</td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="6">No transactions recorded yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,428 @@
+{% extends 'base.html' %}
+{% block title %}Purchase Orders | Busta IM{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Purchase Orders</h1>
+
+{% if can_manage %}
+<div class="card card-soft mb-3">
+  <div class="card-body">
+    <h2 class="h5">Create Purchase Order</h2>
+    <p class="text-muted mb-2">Step 1: select a vendor. Step 2: add raw materials sold by that vendor.</p>
+    <form method="post" id="po-form" class="vstack gap-2">
+      {% csrf_token %}
+      <div class="row g-2">
+        <div class="col-12 col-md-4">
+          <label class="form-label">{{ form.vendor.label }}</label>
+          {{ form.vendor }}
+          {% for error in form.vendor.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="form-label">{{ form.order_date.label }}</label>
+          {{ form.order_date }}
+          {% for error in form.order_date.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-12 col-md-5">
+          <label class="form-label">{{ form.notes.label }}</label>
+          {{ form.notes }}
+          {% for error in form.notes.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+
+      <div id="vendorLineHint" class="alert alert-warning py-2 mb-0{% if selected_create_vendor %} d-none{% endif %}">
+        Select a vendor to load eligible raw materials.
+      </div>
+
+      <div id="line-items" class="vstack gap-2 mt-2"></div>
+
+      {% if form.non_field_errors %}
+        <div class="text-danger small">{{ form.non_field_errors|join:', ' }}</div>
+      {% endif %}
+
+      <div class="d-flex gap-2">
+        <button type="button" id="add-line" class="btn btn-outline-secondary" {% if not selected_create_vendor %}disabled{% endif %}>Add Line Item</button>
+        <button type="submit" class="btn btn-primary">Create Purchase Order</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<div class="card card-soft">
+  <div class="card-body">
+    <h2 class="h5">Purchase Order List</h2>
+    {% url 'purchasing:list' as reset_po_url %}
+    <form method="get" class="row g-2 mb-3 filters-sticky">
+      {% include "partials/search_field.html" with value=filter_values.q placeholder="Search PO ID, vendor, material, notes" %}
+      <div class="col-6 col-md-2">
+        <select name="status" class="form-select">
+          <option value="">All Statuses</option>
+          {% for value, label in status_choices %}
+            <option value="{{ value }}" {% if filter_values.status == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <select name="vendor" class="form-select">
+          <option value="">All Vendors</option>
+          {% for vendor in vendors %}
+            <option value="{{ vendor.id }}" {% if filter_values.vendor == vendor.id|stringformat:'s' %}selected{% endif %}>
+              {{ vendor.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      {% include "partials/filter_date_range.html" with from_value=filter_values.date_from to_value=filter_values.date_to %}
+      {% include "partials/filter_actions.html" with reset_href=reset_po_url apply_col_class='col-12 col-md-1 d-grid' reset_col_class='col-12 col-md-2 d-grid' %}
+    </form>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Vendor</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th>Received</th>
+            <th>Pending</th>
+            <th>Notes</th>
+            <th>Items</th>
+            <th>Exports</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for po in orders %}
+            <tr>
+              <td>{{ po.id }}</td>
+              <td>{{ po.vendor.name }}</td>
+              <td>{{ po.order_date }}</td>
+              <td>
+                {% if po.status == 'received' %}
+                  <span class="badge text-bg-success">Received</span>
+                {% elif po.status == 'partially_received' %}
+                  <span class="badge text-bg-warning">Partially Received</span>
+                {% elif po.status == 'cancelled' %}
+                  <span class="badge text-bg-danger">Cancelled</span>
+                {% else %}
+                  <span class="badge text-bg-secondary">Open</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if po.received_at %}
+                  {{ po.received_at|date:"Y-m-d H:i" }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td>
+                {% for item in po.items.all %}
+                  {{ item.pending_quantity }} {{ item.unit }}{% if not forloop.last %}<br>{% endif %}
+                {% endfor %}
+              </td>
+              <td>{{ po.notes|default:'-' }}</td>
+              <td>{{ po.items.count }}</td>
+              <td>
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'purchasing:export_excel' po.id %}">Excel</a>
+                <a class="btn btn-sm btn-outline-dark" href="{% url 'purchasing:export_pdf' po.id %}">PDF</a>
+              </td>
+              <td>
+                {% if can_manage %}
+                  <div class="d-flex flex-wrap gap-1">
+                    {% if po.can_receive %}
+                      <a class="btn btn-sm btn-success" href="{% url 'purchasing:receive' po.id %}?next={{ request.get_full_path|urlencode }}">Receive</a>
+                    {% endif %}
+                    {% if po.can_cancel %}
+                      <form method="post" action="{% url 'purchasing:cancel' po.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Cancel / Reject</button>
+                      </form>
+                    {% endif %}
+                    {% if po.can_reopen %}
+                      <form method="post" action="{% url 'purchasing:reopen' po.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">Reopen</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="10">No purchase orders found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% include "partials/pagination.html" with page_obj=page_obj %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ vendor_material_map|json_script:"poVendorMaterialMapData" }}
+{{ line_rows_seed|json_script:"poLineRowsSeedData" }}
+<script>
+  (() => {
+    const createVendorSelect = document.getElementById("id_vendor");
+    const addButton = document.getElementById("add-line");
+    const lineItems = document.getElementById("line-items");
+    const vendorHint = document.getElementById("vendorLineHint");
+    const vendorMaterialMapNode = document.getElementById("poVendorMaterialMapData");
+    const seedRowsNode = document.getElementById("poLineRowsSeedData");
+    if (!createVendorSelect || !addButton || !lineItems || !vendorMaterialMapNode || !seedRowsNode) {
+      return;
+    }
+
+    const vendorMaterialMap = JSON.parse(vendorMaterialMapNode.textContent || "{}");
+    const seedRows = JSON.parse(seedRowsNode.textContent || "[]");
+
+    const makeOption = (value, label, selected) => {
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = label;
+      option.selected = !!selected;
+      return option;
+    };
+
+    const getVendorGroups = (vendorId) => vendorMaterialMap[String(vendorId)] || [];
+
+    const findGroupForVariant = (vendorId, variantId) => {
+      const variantKey = String(variantId || "");
+      if (!variantKey) {
+        return null;
+      }
+      const groups = getVendorGroups(vendorId);
+      for (const group of groups) {
+        const variants = Array.isArray(group.variants) ? group.variants : [];
+        if (variants.some((variant) => String(variant.id) === variantKey)) {
+          return group;
+        }
+      }
+      return null;
+    };
+
+    const setMaterialGroupOptions = (selectEl, vendorId, selectedGroupKey) => {
+      const selectedKey = String(selectedGroupKey || "");
+      selectEl.replaceChildren();
+
+      if (!vendorId) {
+        selectEl.disabled = true;
+        selectEl.appendChild(makeOption("", "Select vendor first", true));
+        return;
+      }
+
+      const groups = getVendorGroups(vendorId);
+      if (!groups.length) {
+        selectEl.disabled = true;
+        selectEl.appendChild(makeOption("", "No materials for selected vendor", true));
+        return;
+      }
+
+      selectEl.disabled = false;
+      let hasSelected = false;
+      selectEl.appendChild(makeOption("", "Select material", selectedKey === ""));
+      groups.forEach((group) => {
+        const optionValue = String(group.group_key || "");
+        const selected = optionValue === selectedKey;
+        hasSelected = hasSelected || selected;
+        selectEl.appendChild(makeOption(optionValue, group.label || "Material", selected));
+      });
+      if (!hasSelected && selectedKey) {
+        selectEl.selectedIndex = 0;
+      }
+    };
+
+    const setColourOptions = (selectEl, hiddenMaterialInput, group, selectedMaterialId) => {
+      const selectedId = String(selectedMaterialId || "");
+      selectEl.replaceChildren();
+
+      if (!group) {
+        selectEl.disabled = true;
+        selectEl.required = false;
+        selectEl.appendChild(makeOption("", "Select material first", true));
+        hiddenMaterialInput.value = "";
+        return;
+      }
+
+      const variants = Array.isArray(group.variants) ? group.variants : [];
+      if (!variants.length) {
+        selectEl.disabled = true;
+        selectEl.required = false;
+        selectEl.appendChild(makeOption("", "No colours", true));
+        hiddenMaterialInput.value = "";
+        return;
+      }
+
+      if (variants.length === 1) {
+        const onlyVariant = variants[0];
+        const variantValue = String(onlyVariant.id);
+        selectEl.disabled = true;
+        selectEl.required = false;
+        selectEl.appendChild(makeOption(variantValue, onlyVariant.label || "Default", true));
+        hiddenMaterialInput.value = variantValue;
+        return;
+      }
+
+      selectEl.disabled = false;
+      selectEl.required = true;
+      let hasSelected = false;
+      selectEl.appendChild(makeOption("", "Select colour", selectedId === ""));
+      variants.forEach((variant) => {
+        const variantValue = String(variant.id);
+        const selected = variantValue === selectedId;
+        hasSelected = hasSelected || selected;
+        selectEl.appendChild(makeOption(variantValue, variant.label || "Colour", selected));
+      });
+      if (hasSelected) {
+        hiddenMaterialInput.value = selectedId;
+      } else {
+        selectEl.selectedIndex = 0;
+        hiddenMaterialInput.value = "";
+      }
+    };
+
+    const createRow = (rowData) => {
+      const row = document.createElement("div");
+      row.className = "po-line-item";
+
+      const materialSelect = document.createElement("select");
+      materialSelect.className = "form-select";
+      materialSelect.required = true;
+      materialSelect.setAttribute("data-role", "material-group");
+
+      const colourSelect = document.createElement("select");
+      colourSelect.className = "form-select";
+      colourSelect.setAttribute("data-role", "material-colour");
+
+      const materialInput = document.createElement("input");
+      materialInput.type = "hidden";
+      materialInput.name = "material";
+
+      const qtyInput = document.createElement("input");
+      qtyInput.type = "number";
+      qtyInput.name = "quantity";
+      qtyInput.className = "form-control";
+      qtyInput.step = "0.001";
+      qtyInput.min = "0.001";
+      qtyInput.placeholder = "Qty";
+      qtyInput.required = true;
+      qtyInput.value = rowData.quantity || "";
+
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "btn btn-outline-danger btn-sm remove-line";
+      removeBtn.textContent = "Remove";
+
+      row.appendChild(materialSelect);
+      row.appendChild(colourSelect);
+      row.appendChild(materialInput);
+      row.appendChild(qtyInput);
+      row.appendChild(removeBtn);
+      lineItems.appendChild(row);
+
+      const vendorId = createVendorSelect.value;
+      const selectedMaterialId = rowData.material || "";
+      const preselectedGroup = findGroupForVariant(vendorId, selectedMaterialId);
+      const selectedGroupKey = preselectedGroup ? String(preselectedGroup.group_key || "") : "";
+      setMaterialGroupOptions(materialSelect, vendorId, selectedGroupKey);
+
+      let activeGroup = preselectedGroup;
+      if (!activeGroup && materialSelect.value) {
+        activeGroup = getVendorGroups(vendorId).find(
+          (group) => String(group.group_key || "") === String(materialSelect.value)
+        ) || null;
+      }
+      setColourOptions(colourSelect, materialInput, activeGroup, selectedMaterialId);
+
+      materialSelect.addEventListener("change", () => {
+        const selectedGroup = getVendorGroups(createVendorSelect.value).find(
+          (group) => String(group.group_key || "") === String(materialSelect.value)
+        ) || null;
+        setColourOptions(colourSelect, materialInput, selectedGroup, "");
+      });
+      colourSelect.addEventListener("change", () => {
+        materialInput.value = String(colourSelect.value || "");
+      });
+      return row;
+    };
+
+    const syncVendorState = () => {
+      const vendorId = createVendorSelect.value;
+      if (vendorHint) {
+        vendorHint.classList.toggle("d-none", !!vendorId);
+      }
+      addButton.disabled = !vendorId;
+      lineItems.querySelectorAll(".po-line-item").forEach((rowEl) => {
+        const materialSelect = rowEl.querySelector('select[data-role="material-group"]');
+        const colourSelect = rowEl.querySelector('select[data-role="material-colour"]');
+        const materialInput = rowEl.querySelector('input[name="material"]');
+        if (!materialSelect || !colourSelect || !materialInput) {
+          return;
+        }
+
+        const selectedMaterialId = materialInput.value;
+        const preselectedGroup = findGroupForVariant(vendorId, selectedMaterialId);
+        const selectedGroupKey = preselectedGroup ? String(preselectedGroup.group_key || "") : String(materialSelect.value || "");
+        setMaterialGroupOptions(materialSelect, vendorId, selectedGroupKey);
+        const activeGroup = getVendorGroups(vendorId).find(
+          (group) => String(group.group_key || "") === String(materialSelect.value || "")
+        ) || null;
+        const preferredMaterialId = preselectedGroup ? selectedMaterialId : "";
+        setColourOptions(colourSelect, materialInput, activeGroup, preferredMaterialId);
+      });
+      lineItems.querySelectorAll(".remove-line").forEach((button) => {
+        button.disabled = !vendorId;
+      });
+    };
+
+    addButton.addEventListener("click", () => {
+      createRow({});
+      syncVendorState();
+    });
+
+    lineItems.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !target.classList.contains("remove-line")) {
+        return;
+      }
+      const row = target.closest(".po-line-item");
+      if (!row) {
+        return;
+      }
+      if (lineItems.children.length === 1) {
+        const input = row.querySelector('input[name="quantity"]');
+        const materialGroupSelect = row.querySelector('select[data-role="material-group"]');
+        const colourSelect = row.querySelector('select[data-role="material-colour"]');
+        const materialInput = row.querySelector('input[name="material"]');
+        if (input) {
+          input.value = "";
+        }
+        if (materialGroupSelect) {
+          materialGroupSelect.selectedIndex = 0;
+        }
+        if (colourSelect) {
+          colourSelect.selectedIndex = 0;
+        }
+        if (materialInput) {
+          materialInput.value = "";
+        }
+        return;
+      }
+      row.remove();
+    });
+
+    createVendorSelect.addEventListener("change", syncVendorState);
+
+    if (Array.isArray(seedRows) && seedRows.length) {
+      seedRows.forEach((rowData) => createRow(rowData || {}));
+    } else {
+      createRow({});
+    }
+    syncVendorState();
+  })();
+</script>
+{% endblock %}

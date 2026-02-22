@@ -1,0 +1,475 @@
+{% extends 'base.html' %}
+{% load query_helpers %}
+{% block title %}Raw Materials | Busta IM{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 mb-0">Raw Materials Inventory</h1>
+  {% if can_manage %}
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-primary" id="uploadMaterialCsvBtn" type="button" data-template-url="{% url 'inventory:csv_template' %}" data-bs-toggle="modal" data-bs-target="#uploadMaterialCsvModal">
+        Upload CSV
+      </button>
+      <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#createMaterialModal">
+        Add Raw Material
+      </button>
+    </div>
+  {% endif %}
+</div>
+
+<form method="get" class="card card-soft mb-3 filters-sticky">
+  <div class="card-body">
+    <input type="hidden" name="sort" value="{{ sort_key }}">
+    <input type="hidden" name="direction" value="{{ sort_direction }}">
+    {% url 'inventory:list' as reset_inventory_url %}
+    <div class="row g-2">
+      {% include "partials/search_field.html" with label="Search Raw Materials" value=filter_values.q placeholder="Search RM ID, material, code, colour code, supplier" %}
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1">Material Type</label>
+        <select name="material_type" class="form-select form-select-sm">
+          <option value="">All Types</option>
+          {% for value, label in material_type_choices %}
+            <option value="{{ value }}" {% if filter_values.material_type == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1">Supplier</label>
+        <select name="vendor" class="form-select form-select-sm">
+          <option value="">All Suppliers</option>
+          {% for supplier in supplier_choices %}
+            <option value="{{ supplier.id }}" {% if filter_values.vendor == supplier.id|stringformat:'s' %}selected{% endif %}>
+              {{ supplier.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1">Stock State</label>
+        <select name="stock" class="form-select form-select-sm">
+          <option value="">All Stock</option>
+          <option value="low" {% if filter_values.stock == 'low' %}selected{% endif %}>Low Stock</option>
+          <option value="healthy" {% if filter_values.stock == 'healthy' %}selected{% endif %}>Healthy Stock</option>
+        </select>
+      </div>
+      {% include "partials/filter_actions.html" with reset_href=reset_inventory_url reset_col_class="col-12 col-md-2" %}
+    </div>
+  </div>
+</form>
+
+{% if can_manage %}
+  <div class="card card-soft mb-3">
+    <div class="card-body">
+      <h2 class="h5 mb-2">Production RM Requests</h2>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Product</th>
+              <th>Planned Qty</th>
+              <th>Requested By</th>
+              <th>Requested At</th>
+              <th>Required Materials</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for order in pending_production_requests %}
+              <tr>
+                <td>#{{ order.id }}</td>
+                <td>{{ order.product.name }}</td>
+                <td>{{ order.planned_qty|floatformat:3 }}</td>
+                <td>{{ order.created_by.username|default:'-' }}</td>
+                <td>{{ order.created_at|date:'Y-m-d H:i' }}</td>
+                <td>
+                  {% for consumption in order.consumptions.all %}
+                    {{ consumption.material.name }}{% if consumption.material.colour_code and consumption.material.colour_code != 'NA' %} ({{ consumption.material.colour_code }}){% endif %}: {{ consumption.required_qty }} {{ consumption.material.unit }}{% if not forloop.last %}<br>{% endif %}
+                  {% empty %}
+                    -
+                  {% endfor %}
+                </td>
+                <td>
+                  <div class="d-flex gap-1 flex-wrap">
+                    <form method="post" action="{% url 'inventory:release_production_request' order.id %}">
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-sm btn-outline-success">Release</button>
+                    </form>
+                    <form method="post" action="{% url 'inventory:reject_production_request' order.id %}" onsubmit="return confirm('Reject and cancel this production order request?');">
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-sm btn-outline-danger">Reject</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="7">No pending production raw material requests.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+<div class="card card-soft">
+  <div class="card-body">
+    <div class="table-tools">
+      <div class="table-meta">{{ page_obj.paginator.count }} materials</div>
+      <div class="table-meta">Click column headers to sort</div>
+    </div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-sm table-minimal table-col-separators align-middle">
+          <thead>
+            <tr>
+              <th><a class="sort-link {% if sort_state.id.active %}active{% endif %}" href="{% replace_query request sort='id' direction=sort_state.id.next page='' %}">ID {{ sort_state.id.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.rm_id.active %}active{% endif %}" href="{% replace_query request sort='rm_id' direction=sort_state.rm_id.next page='' %}">RM ID {{ sort_state.rm_id.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.material.active %}active{% endif %}" href="{% replace_query request sort='material' direction=sort_state.material.next page='' %}">Material {{ sort_state.material.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.code.active %}active{% endif %}" href="{% replace_query request sort='code' direction=sort_state.code.next page='' %}">Code {{ sort_state.code.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.type.active %}active{% endif %}" href="{% replace_query request sort='type' direction=sort_state.type.next page='' %}">Type {{ sort_state.type.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.colour.active %}active{% endif %}" href="{% replace_query request sort='colour' direction=sort_state.colour.next page='' %}">Colour {{ sort_state.colour.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.colour_code.active %}active{% endif %}" href="{% replace_query request sort='colour_code' direction=sort_state.colour_code.next page='' %}">Colour Code {{ sort_state.colour_code.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.stock.active %}active{% endif %}" href="{% replace_query request sort='stock' direction=sort_state.stock.next page='' %}">Stock {{ sort_state.stock.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.cost.active %}active{% endif %}" href="{% replace_query request sort='cost' direction=sort_state.cost.next page='' %}">Cost / Unit {{ sort_state.cost.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.reorder.active %}active{% endif %}" href="{% replace_query request sort='reorder' direction=sort_state.reorder.next page='' %}">Reorder {{ sort_state.reorder.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.suppliers.active %}active{% endif %}" href="{% replace_query request sort='suppliers' direction=sort_state.suppliers.next page='' %}">Suppliers {{ sort_state.suppliers.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.adjust.active %}active{% endif %}" href="{% replace_query request sort='adjust' direction=sort_state.adjust.next page='' %}">Adjust {{ sort_state.adjust.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.actions.active %}active{% endif %}" href="{% replace_query request sort='actions' direction=sort_state.actions.next page='' %}">Actions {{ sort_state.actions.icon }}</a></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for material in materials %}
+              <tr class="{% if material.is_low_stock %}low-stock{% endif %}">
+                <td>{{ material.id }}</td>
+                <td>{{ material.rm_id|default:'-' }}</td>
+                <td>{{ material.name }}</td>
+                <td>{{ material.code }}</td>
+                <td><span class="badge badge-soft">{{ material.get_material_type_display }}</span></td>
+                <td>{{ material.colour|default:"-" }}</td>
+                <td>{{ material.colour_code|default:"-" }}</td>
+                <td>{{ material.current_stock }} {{ material.unit }}</td>
+                <td>{{ material.cost_per_unit|floatformat:3 }}</td>
+                <td>{{ material.reorder_level }}</td>
+                <td>{{ material.supplier_names }}</td>
+                <td>
+                  {% if can_manage %}
+                    <form method="post" action="{% url 'inventory:adjust' %}" class="inline-form">
+                      {% csrf_token %}
+                      <input type="hidden" name="material_id" value="{{ material.id }}">
+                      <input type="number" name="delta" class="form-control form-control-sm" placeholder="+/-" step="0.001" required>
+                      <input type="text" name="reason" class="form-control form-control-sm" placeholder="Reason" required>
+                      <button type="submit" class="btn btn-sm btn-outline-primary">Apply</button>
+                    </form>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>
+                  {% if can_manage %}
+                    <div class="row-actions">
+                      <a class="btn btn-sm btn-outline-secondary" href="{% url 'inventory:edit' material.id %}">Edit</a>
+                      <form method="post" action="{% url 'inventory:delete' material.id %}" onsubmit="return confirm('Delete this raw material?');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                      </form>
+                    </div>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="13">No raw materials found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% include "partials/pagination.html" with page_obj=page_obj %}
+  </div>
+</div>
+
+{% if can_manage %}
+  <div class="modal fade" id="uploadMaterialCsvModal" tabindex="-1" aria-labelledby="uploadMaterialCsvModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0" id="uploadMaterialCsvModalLabel">Upload Raw Material CSV</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form method="post" enctype="multipart/form-data">
+          <div class="modal-body vstack gap-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="upload_csv">
+            <div class="small text-muted">
+              Template downloads when you click Upload CSV. You can also download it again below.
+            </div>
+            <a class="btn btn-sm btn-outline-secondary align-self-start" href="{% url 'inventory:csv_template' %}">
+              Download Template CSV
+            </a>
+            <div>
+              <label class="form-label">{{ csv_form.csv_file.label }}</label>
+              {{ csv_form.csv_file }}
+              {% for error in csv_form.csv_file.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" type="submit">Upload</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="createMaterialModal" tabindex="-1" aria-labelledby="createMaterialModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0" id="createMaterialModalLabel">Add Raw Material</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form method="post" id="createMaterialForm">
+          <div class="modal-body vstack gap-3">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_material">
+            <div class="row g-2">
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.name.label }}</label>
+                {{ create_form.name }}
+                {% for error in create_form.name.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.rm_id.label }}</label>
+                {{ create_form.rm_id }}
+                {% for error in create_form.rm_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.material_type.label }}</label>
+                {{ create_form.material_type }}
+                {% for error in create_form.material_type.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.unit.label }}</label>
+                {{ create_form.unit }}
+                {% for error in create_form.unit.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.cost_per_unit.label }}</label>
+                {{ create_form.cost_per_unit }}
+                {% for error in create_form.cost_per_unit.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.reorder_level.label }}</label>
+                {{ create_form.reorder_level }}
+                {% for error in create_form.reorder_level.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.vendor.label }}</label>
+                {{ create_form.vendor }}
+                {% for error in create_form.vendor.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.additional_vendors.label }}</label>
+                {{ create_form.additional_vendors }}
+                {% if create_form.additional_vendors.help_text %}<div class="form-help">{{ create_form.additional_vendors.help_text }}</div>{% endif %}
+                {% for error in create_form.additional_vendors.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+            </div>
+            <div>
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h3 class="h6 mb-0">Colour Variants</h3>
+                <button class="btn btn-sm btn-outline-primary" type="button" id="addMaterialVariantRowBtn">Add Colour</button>
+              </div>
+              <div class="table-shell">
+                <div class="table-responsive">
+                  <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th style="min-width: 180px;">Colour</th>
+                        <th style="min-width: 180px;">Colour Code</th>
+                        <th style="min-width: 210px;">Material Code (Optional)</th>
+                        <th style="min-width: 160px;">Opening Stock</th>
+                        <th style="width: 90px;">Row</th>
+                      </tr>
+                    </thead>
+                    <tbody id="materialVariantRows"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="form-help mt-2">
+                Each colour row will be created as a separate stock line. Same RM ID is allowed across rows as long as Colour Code is different.
+              </div>
+              {% for error in create_form.colour_code.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              {% for error in create_form.code.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              {% for error in create_form.opening_stock.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            {% if create_form.non_field_errors %}
+              <div class="text-danger small">{{ create_form.non_field_errors|join:', ' }}</div>
+            {% endif %}
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" type="submit">Create Material</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {% if can_manage %}
+    {{ variant_rows_seed|json_script:"materialVariantRowsSeedData" }}
+    <script>
+      (() => {
+        const button = document.getElementById("uploadMaterialCsvBtn");
+        if (!button) {
+          return;
+        }
+        const triggerTemplateDownload = (url) => {
+          if (!url) {
+            return;
+          }
+          const frame = document.createElement("iframe");
+          frame.style.display = "none";
+          frame.src = url;
+          document.body.appendChild(frame);
+          setTimeout(() => frame.remove(), 3000);
+        };
+        button.addEventListener("click", () => {
+          triggerTemplateDownload(button.dataset.templateUrl || "");
+        });
+      })();
+    </script>
+    <script>
+      (() => {
+        const rowsBody = document.getElementById("materialVariantRows");
+        const addRowBtn = document.getElementById("addMaterialVariantRowBtn");
+        const seedNode = document.getElementById("materialVariantRowsSeedData");
+        if (!rowsBody || !addRowBtn || !seedNode) {
+          return;
+        }
+
+        const seedRows = JSON.parse(seedNode.textContent || "[]");
+        const createRow = (rowData) => {
+          const row = document.createElement("tr");
+
+          const colourCell = document.createElement("td");
+          const colourCodeCell = document.createElement("td");
+          const codeCell = document.createElement("td");
+          const stockCell = document.createElement("td");
+          const removeCell = document.createElement("td");
+
+          const colourInput = document.createElement("input");
+          colourInput.type = "text";
+          colourInput.name = "variant_colour";
+          colourInput.className = "form-control form-control-sm";
+          colourInput.placeholder = "e.g. Blue";
+          colourInput.value = rowData.colour || "";
+
+          const colourCodeInput = document.createElement("input");
+          colourCodeInput.type = "text";
+          colourCodeInput.name = "variant_colour_code";
+          colourCodeInput.className = "form-control form-control-sm";
+          colourCodeInput.placeholder = "e.g. BLU";
+          colourCodeInput.value = rowData.colour_code || "";
+          colourCodeInput.required = true;
+
+          const codeInput = document.createElement("input");
+          codeInput.type = "text";
+          codeInput.name = "variant_code";
+          codeInput.className = "form-control form-control-sm";
+          codeInput.placeholder = "Optional";
+          codeInput.value = rowData.code || "";
+
+          const stockInput = document.createElement("input");
+          stockInput.type = "number";
+          stockInput.name = "variant_opening_stock";
+          stockInput.className = "form-control form-control-sm";
+          stockInput.min = "0";
+          stockInput.step = "0.001";
+          stockInput.required = true;
+          stockInput.value = rowData.opening_stock || "";
+
+          const removeBtn = document.createElement("button");
+          removeBtn.type = "button";
+          removeBtn.className = "btn btn-sm btn-outline-danger";
+          removeBtn.textContent = "Remove";
+          removeBtn.setAttribute("data-remove-variant-row", "1");
+
+          colourCell.appendChild(colourInput);
+          colourCodeCell.appendChild(colourCodeInput);
+          codeCell.appendChild(codeInput);
+          stockCell.appendChild(stockInput);
+          removeCell.appendChild(removeBtn);
+
+          row.appendChild(colourCell);
+          row.appendChild(colourCodeCell);
+          row.appendChild(codeCell);
+          row.appendChild(stockCell);
+          row.appendChild(removeCell);
+          rowsBody.appendChild(row);
+        };
+
+        rowsBody.addEventListener("click", (event) => {
+          const removeBtn = event.target.closest("[data-remove-variant-row]");
+          if (!removeBtn) {
+            return;
+          }
+          if (rowsBody.querySelectorAll("tr").length <= 1) {
+            const row = removeBtn.closest("tr");
+            if (!row) {
+              return;
+            }
+            row.querySelectorAll("input").forEach((input) => {
+              input.value = "";
+            });
+            return;
+          }
+          const row = removeBtn.closest("tr");
+          if (row) {
+            row.remove();
+          }
+        });
+
+        addRowBtn.addEventListener("click", () => {
+          createRow({});
+        });
+
+        if (Array.isArray(seedRows) && seedRows.length) {
+          seedRows.forEach((rowData) => createRow(rowData || {}));
+        } else {
+          createRow({});
+        }
+      })();
+    </script>
+  {% endif %}
+
+  {% if show_create_modal and can_manage %}
+    <script>
+      (() => {
+        const modalEl = document.getElementById("createMaterialModal");
+        if (!modalEl) {
+          return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
+
+  {% if show_csv_modal and can_manage %}
+    <script>
+      (() => {
+        const modalEl = document.getElementById("uploadMaterialCsvModal");
+        if (!modalEl) {
+          return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
+{% endblock %}

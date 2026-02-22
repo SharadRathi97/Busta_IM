@@ -1,0 +1,238 @@
+{% extends 'base.html' %}
+{% block title %}Production Orders | Busta IM{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Production Orders</h1>
+
+<div class="row g-2 mb-3">
+  <div class="col-6 col-md-3">
+    <div class="card card-soft">
+      <div class="card-body py-2">
+        <div class="small text-muted">Open Orders</div>
+        <div class="h5 mb-0">{{ kpi_open_orders }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card card-soft">
+      <div class="card-body py-2">
+        <div class="small text-muted">Completed Orders</div>
+        <div class="h5 mb-0">{{ kpi_completed_orders }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card card-soft">
+      <div class="card-body py-2">
+        <div class="small text-muted">Finished Stock</div>
+        <div class="h5 mb-0">{{ kpi_finished_stock|floatformat:3 }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card card-soft">
+      <div class="card-body py-2">
+        <div class="small text-muted">Total Scrap</div>
+        <div class="h5 mb-0">{{ kpi_total_scrap|floatformat:3 }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if can_manage %}
+<div class="card card-soft mb-3">
+  <div class="card-body">
+    <h2 class="h5">Create Production Order</h2>
+    <form method="post" class="row g-2 align-items-end">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <div class="col-12 col-md-4">
+        <label class="form-label">{{ create_form.product.label }}</label>
+        {{ create_form.product }}
+      </div>
+      <div class="col-12 col-md-2">
+        <label class="form-label">{{ create_form.quantity.label }}</label>
+        {{ create_form.quantity }}
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label">{{ create_form.notes.label }}</label>
+        {{ create_form.notes }}
+      </div>
+      <div class="col-12 col-md-2">
+        <button class="btn btn-primary w-100" type="submit">Create</button>
+      </div>
+      {% if create_form.non_field_errors %}
+        <div class="col-12 text-danger small">{{ create_form.non_field_errors|join:', ' }}</div>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<form method="get" class="card card-soft mb-3 filters-sticky">
+  <div class="card-body">
+    {% url 'production:orders' as reset_production_order_url %}
+    <div class="row g-2">
+      {% include "partials/search_field.html" with label="Search Production Orders" value=filter_values.q placeholder="Search order ID, product, notes, user" %}
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1">Status</label>
+        <select name="status" class="form-select form-select-sm">
+          <option value="">All Statuses</option>
+          {% for value, label in status_choices %}
+            <option value="{{ value }}" {% if filter_values.status == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1">Product</label>
+        <select name="product" class="form-select form-select-sm">
+          <option value="">All Products</option>
+          {% for product in product_choices %}
+            <option value="{{ product.id }}" {% if filter_values.product == product.id|stringformat:'s' %}selected{% endif %}>
+              {{ product.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      {% include "partials/filter_date_range.html" with from_label='Created From' to_label='Created To' from_value=filter_values.date_from to_value=filter_values.date_to %}
+      {% include "partials/filter_actions.html" with reset_href=reset_production_order_url apply_col_class='col-6 col-md-1' reset_col_class='col-6 col-md-1' %}
+    </div>
+  </div>
+</form>
+
+<div class="card card-soft">
+  <div class="card-body">
+    <h2 class="h5">Order List</h2>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Product</th>
+            <th>Planned Qty</th>
+            <th>Produced Qty</th>
+            <th>Scrap Qty</th>
+            <th>Variance</th>
+            <th>Status</th>
+            <th>Created By</th>
+            <th>Completed At</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in orders %}
+            <tr>
+              <td>{{ order.id }}</td>
+              <td>{{ order.product.name }}</td>
+              <td>{{ order.planned_qty|floatformat:3 }}</td>
+              <td>{% if order.status == 'completed' %}{{ order.produced_qty|floatformat:3 }}{% else %}-{% endif %}</td>
+              <td>{% if order.status == 'completed' %}{{ order.scrap_qty|floatformat:3 }}{% else %}-{% endif %}</td>
+              <td>{% if order.status == 'completed' %}{{ order.variance_qty|floatformat:3 }}{% else %}-{% endif %}</td>
+              <td>
+                {% if order.status == 'awaiting_rm_release' %}
+                  <span class="badge text-bg-info">Awaiting RM Release</span>
+                {% elif order.status == 'planned' %}
+                  <span class="badge text-bg-primary">Planned</span>
+                {% elif order.status == 'in_progress' %}
+                  <span class="badge text-bg-warning">In Progress</span>
+                {% elif order.status == 'cancelled' %}
+                  <span class="badge text-bg-danger">Cancelled</span>
+                {% else %}
+                  <span class="badge text-bg-success">Completed</span>
+                {% endif %}
+              </td>
+              <td>{{ order.created_by.username|default:'-' }}</td>
+              <td>{% if order.completed_at %}{{ order.completed_at|date:'Y-m-d H:i' }}{% else %}-{% endif %}</td>
+              <td>
+                {% if can_manage %}
+                  <div class="d-flex flex-wrap gap-1 align-items-center">
+                    {% if order.status != 'cancelled' and order.status != 'completed' and order.status != 'awaiting_rm_release' %}
+                      <form method="post" action="{% url 'production:update_status' %}" class="inline-form production-status-form" data-current-status="{{ order.status }}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ next_url }}">
+                        <input type="hidden" name="order_id" value="{{ order.id }}">
+                        <select name="status" class="form-select form-select-sm">
+                          <option value="planned" {% if order.status == 'planned' %}selected{% endif %}>Planned</option>
+                          <option value="in_progress" {% if order.status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                          <option value="completed" {% if order.status == 'completed' %}selected{% endif %}>Completed</option>
+                        </select>
+                        <div class="completion-inputs d-none">
+                          <input type="number" name="produced_qty" class="form-control form-control-sm" min="0.001" step="0.001" placeholder="Produced">
+                          <input type="number" name="scrap_qty" class="form-control form-control-sm" min="0" step="0.001" placeholder="Scrap" value="0.000">
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary" type="submit">Update</button>
+                      </form>
+                    {% endif %}
+                    {% if order.status == 'awaiting_rm_release' %}
+                      <span class="text-muted small">Waiting for Inventory Manager release</span>
+                    {% endif %}
+                    {% if order.status != 'cancelled' and order.status != 'completed' %}
+                      <form method="post" action="{% url 'production:cancel_order' order.id %}" onsubmit="return confirm('Cancel / reject this production order? Raw material consumption will be reversed.');">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ next_url }}">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Cancel / Reject</button>
+                      </form>
+                    {% endif %}
+                    {% if order.status == 'completed' %}
+                      <select class="form-select form-select-sm" disabled>
+                        <option selected>Completed</option>
+                      </select>
+                    {% endif %}
+                    {% if order.status == 'cancelled' %}
+                      <span class="text-muted small">Cancelled</span>
+                    {% endif %}
+                  </div>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="10">No production orders found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% include "partials/pagination.html" with page_obj=page_obj %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (() => {
+    const forms = document.querySelectorAll(".production-status-form");
+    forms.forEach((form) => {
+      const select = form.querySelector('select[name="status"]');
+      const completionInputs = form.querySelector(".completion-inputs");
+      const producedInput = form.querySelector('input[name="produced_qty"]');
+      const scrapInput = form.querySelector('input[name="scrap_qty"]');
+      if (!select || !completionInputs || !producedInput || !scrapInput) {
+        return;
+      }
+      const syncCompletionInputs = () => {
+        const completing = select.value === "completed";
+        completionInputs.classList.toggle("d-none", !completing);
+        producedInput.required = completing;
+        scrapInput.required = false;
+        if (!completing) {
+          producedInput.value = "";
+          scrapInput.value = "0.000";
+        }
+      };
+      select.addEventListener("change", syncCompletionInputs);
+      syncCompletionInputs();
+
+      form.addEventListener("submit", (event) => {
+        const selectedStatus = select.value;
+        const currentStatus = form.dataset.currentStatus || "";
+        if (selectedStatus === "completed" && currentStatus !== "completed") {
+          const ok = window.confirm("Mark this production order as Completed? You won’t be able to change it later.");
+          if (!ok) {
+            event.preventDefault();
+          }
+        }
+      });
+    });
+  })();
+</script>
+{% endblock %}

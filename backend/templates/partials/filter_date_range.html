@@ -1,0 +1,8 @@
+<div class="{{ from_col_class|default:'col-6 col-md-2' }}">
+  <label class="form-label mb-1">{{ from_label|default:'From' }}</label>
+  <input type="date" name="{{ from_name|default:'date_from' }}" value="{{ from_value|default:'' }}" class="form-control form-control-sm">
+</div>
+<div class="{{ to_col_class|default:'col-6 col-md-2' }}">
+  <label class="form-label mb-1">{{ to_label|default:'To' }}</label>
+  <input type="date" name="{{ to_name|default:'date_to' }}" value="{{ to_value|default:'' }}" class="form-control form-control-sm">
+</div>

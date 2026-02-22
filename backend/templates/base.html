@@ -1,0 +1,44 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Busta IM{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  </head>
+  <body>
+    {% if request.user.is_authenticated %}
+      <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top border-bottom border-secondary-subtle">
+        <div class="container-fluid">
+          <a class="navbar-brand fw-bold" href="{% url 'dashboard:home' %}">Busta IM</a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+          </button>
+          <div class="collapse navbar-collapse" id="mainNav">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+              {% for item in app_navigation %}
+                <li class="nav-item">
+                  <a class="nav-link{% if item.is_active %} active{% endif %}" href="{% url item.url_name %}">
+                    {{ item.label }}
+                  </a>
+                </li>
+              {% endfor %}
+            </ul>
+            <span class="badge rounded-pill text-bg-secondary me-2">{{ request.user.get_full_name|default:request.user.username }} ({{ request.user.get_role_display }})</span>
+            <a class="btn btn-sm btn-outline-light" href="{% url 'accounts:logout' %}">Logout</a>
+          </div>
+        </div>
+      </nav>
+    {% endif %}
+
+    <main class="container-fluid py-3 px-3 px-md-4 app-container">
+      {% include "partials/flash_messages.html" %}
+      {% block content %}{% endblock %}
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

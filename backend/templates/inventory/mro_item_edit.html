@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block title %}Edit MRO Item | Busta IM{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 mb-0">Edit MRO Item</h1>
+  <a class="btn btn-outline-secondary btn-sm" href="{% url 'inventory:mro_list' %}">Back</a>
+</div>
+
+<div class="card card-soft">
+  <div class="card-body">
+    <div class="mb-2 text-muted small">
+      Editing <strong>{{ item.name }}</strong> ({{ item.mro_id }}) | Current stock: {{ item.current_stock }} {{ item.unit }}
+    </div>
+    <form method="post" class="vstack gap-2">
+      {% csrf_token %}
+      {% for field in form %}
+        <div>
+          <label class="form-label">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<div class="form-help">{{ field.help_text }}</div>{% endif %}
+          {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      {% endfor %}
+      {% if form.non_field_errors %}
+        <div class="text-danger small">{{ form.non_field_errors|join:', ' }}</div>
+      {% endif %}
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Save Changes</button>
+        <a class="btn btn-outline-secondary" href="{% url 'inventory:mro_list' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

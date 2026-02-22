@@ -1,0 +1,11 @@
+{% if messages %}
+  {% for message in messages %}
+    {% with level=message.level_tag %}
+      <div class="alert app-alert {% if level == 'error' %}alert-danger{% elif level == 'warning' %}alert-warning{% elif level == 'success' %}alert-success{% else %}alert-info{% endif %} py-2 alert-dismissible fade show" role="alert">
+        <span class="app-alert-label">{{ level|capfirst }}</span>
+        <span>{{ message }}</span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    {% endwith %}
+  {% endfor %}
+{% endif %}

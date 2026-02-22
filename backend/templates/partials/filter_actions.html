@@ -1,0 +1,10 @@
+<div class="{{ apply_col_class|default:'col-6 col-md-2' }}">
+  <div class="d-flex align-items-end h-100">
+    <button type="submit" class="btn btn-outline-primary btn-sm w-100 filter-action-btn">Apply</button>
+  </div>
+</div>
+<div class="{{ reset_col_class|default:'col-6 col-md-2' }}">
+  <div class="d-flex align-items-end h-100">
+    <a class="btn btn-outline-secondary btn-sm w-100 filter-action-btn" href="{{ reset_href|default:'#' }}">Reset</a>
+  </div>
+</div>

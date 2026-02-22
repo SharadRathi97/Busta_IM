@@ -1,0 +1,22 @@
+{% load query_helpers %}
+{% if page_obj and page_obj.paginator.num_pages > 1 %}
+  <nav aria-label="Pagination" class="mt-3">
+    <ul class="pagination pagination-sm flex-wrap mb-0">
+      <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+        <a class="page-link" href="{% if page_obj.has_previous %}{% replace_query request page=1 %}{% else %}#{% endif %}">First</a>
+      </li>
+      <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+        <a class="page-link" href="{% if page_obj.has_previous %}{% replace_query request page=page_obj.previous_page_number %}{% else %}#{% endif %}">Prev</a>
+      </li>
+      <li class="page-item disabled">
+        <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+      </li>
+      <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+        <a class="page-link" href="{% if page_obj.has_next %}{% replace_query request page=page_obj.next_page_number %}{% else %}#{% endif %}">Next</a>
+      </li>
+      <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+        <a class="page-link" href="{% if page_obj.has_next %}{% replace_query request page=page_obj.paginator.num_pages %}{% else %}#{% endif %}">Last</a>
+      </li>
+    </ul>
+  </nav>
+{% endif %}

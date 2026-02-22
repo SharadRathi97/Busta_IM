@@ -1,0 +1,144 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard | Busta IM{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Dashboard</h1>
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card card-soft">
+      <div class="card-body">
+        <div class="card-title">Raw Materials</div>
+        <div class="kpi-value">{{ total_materials }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card card-soft">
+      <div class="card-body">
+        <div class="card-title">Finished Products</div>
+        <div class="kpi-value">{{ total_products }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card card-soft">
+      <div class="card-body">
+        <div class="card-title">Vendors/Buyers</div>
+        <div class="kpi-value">{{ total_partners }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card card-soft">
+      <div class="card-body">
+        <div class="card-title">Production In Progress</div>
+        <div class="kpi-value">{{ in_progress }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card card-soft">
+      <div class="card-body">
+        <div class="card-title">Pending PO Receipts</div>
+        <div class="kpi-value">{{ open_purchase_orders }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card card-soft">
+      <div class="card-body">
+        <div class="card-title">Finished Stock</div>
+        <div class="kpi-value">{{ total_finished_stock|floatformat:3 }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card card-soft">
+      <div class="card-body">
+        <div class="card-title">Completed Production</div>
+        <div class="kpi-value">{{ completed_production_orders }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card kpi-card card-soft">
+      <div class="card-body">
+        <div class="card-title">Production Scrap</div>
+        <div class="kpi-value">{{ total_production_scrap|floatformat:3 }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-6">
+    <div class="card card-soft">
+      <div class="card-body">
+        <h2 class="h5">Low Stock Alerts</h2>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Material</th>
+                <th>Code</th>
+                <th>Stock</th>
+                <th>Reorder</th>
+                <th>Unit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in low_stock_items %}
+                <tr class="low-stock">
+                  <td>{{ item.name }}</td>
+                  <td>{{ item.code }}</td>
+                  <td>{{ item.current_stock }}</td>
+                  <td>{{ item.reorder_level }}</td>
+                  <td>{{ item.unit }}</td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="5">No low stock alerts.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-6">
+    <div class="card card-soft">
+      <div class="card-body">
+        <h2 class="h5">Recent Inventory Transactions</h2>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Material</th>
+                <th>Type</th>
+                <th>Quantity</th>
+                <th>Reason</th>
+                <th>User</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in recent_ledger %}
+                <tr>
+                  <td>{{ row.id }}</td>
+                  <td>{{ row.material.name }}</td>
+                  <td>{{ row.txn_type }}</td>
+                  <td>{{ row.quantity }} {{ row.unit }}</td>
+                  <td>{{ row.reason }}</td>
+                  <td>{% if row.created_by %}{{ row.created_by.get_full_name|default:row.created_by.username }}{% else %}-{% endif %}</td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="6">No transactions recorded yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

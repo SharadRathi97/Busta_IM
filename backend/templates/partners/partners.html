@@ -1,0 +1,228 @@
+{% extends 'base.html' %}
+{% load query_helpers %}
+{% block title %}Vendors | Busta IM{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 mb-0">Vendors / Buyers</h1>
+  {% if can_add %}
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-primary" id="uploadPartnerCsvBtn" type="button" data-template-url="{% url 'partners:csv_template' %}" data-bs-toggle="modal" data-bs-target="#uploadPartnerCsvModal">
+        Upload CSV
+      </button>
+      <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#createPartnerModal">
+        Add Vendor / Buyer
+      </button>
+    </div>
+  {% endif %}
+</div>
+
+<form method="get" class="card card-soft mb-3 filters-sticky">
+  <div class="card-body">
+    <input type="hidden" name="sort" value="{{ sort_key }}">
+    <input type="hidden" name="direction" value="{{ sort_direction }}">
+    {% url 'partners:list' as reset_partner_url %}
+    <div class="row g-2">
+      {% include "partials/search_field.html" with label="Search Vendors" value=filter_values.q placeholder="Search vendor ID, name, GSTIN, city, contact" %}
+      <div class="col-6 col-md-3">
+        <label class="form-label mb-1">Partner Type</label>
+        <select name="partner_type" class="form-select form-select-sm">
+          <option value="">All Types</option>
+          {% for value, label in partner_type_choices %}
+            <option value="{{ value }}" {% if filter_values.partner_type == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% include "partials/filter_actions.html" with reset_href=reset_partner_url reset_col_class="col-12 col-md-3" %}
+    </div>
+  </div>
+</form>
+
+<div class="card card-soft">
+  <div class="card-body">
+    <div class="table-tools">
+      <div class="table-meta">{{ page_obj.paginator.count }} partners</div>
+      <div class="table-meta">Click column headers to sort</div>
+    </div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-sm table-minimal table-col-separators align-middle">
+          <thead>
+            <tr>
+              <th><a class="sort-link {% if sort_state.vendor_id.active %}active{% endif %}" href="{% replace_query request sort='vendor_id' direction=sort_state.vendor_id.next page='' %}">Vendor ID {{ sort_state.vendor_id.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.name.active %}active{% endif %}" href="{% replace_query request sort='name' direction=sort_state.name.next page='' %}">Name {{ sort_state.name.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.type.active %}active{% endif %}" href="{% replace_query request sort='type' direction=sort_state.type.next page='' %}">Type {{ sort_state.type.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.gstin.active %}active{% endif %}" href="{% replace_query request sort='gstin' direction=sort_state.gstin.next page='' %}">GSTIN {{ sort_state.gstin.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.address.active %}active{% endif %}" href="{% replace_query request sort='address' direction=sort_state.address.next page='' %}">Address {{ sort_state.address.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.contact.active %}active{% endif %}" href="{% replace_query request sort='contact' direction=sort_state.contact.next page='' %}">Contact {{ sort_state.contact.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.actions.active %}active{% endif %}" href="{% replace_query request sort='actions' direction=sort_state.actions.next page='' %}">Actions {{ sort_state.actions.icon }}</a></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for partner in partners %}
+              <tr>
+                <td>{{ partner.vendor_id|default:'-' }}</td>
+                <td>{{ partner.name }}</td>
+                <td><span class="badge badge-soft">{{ partner.get_partner_type_display }}</span></td>
+                <td>{{ partner.gst_number }}</td>
+                <td>
+                  <div class="address-lines small">
+                    <div>{{ partner.address_line1 }}</div>
+                    {% if partner.address_line2 %}<div>{{ partner.address_line2 }}</div>{% endif %}
+                    <div>{{ partner.city }}, {{ partner.state }} {{ partner.pincode }}</div>
+                  </div>
+                </td>
+                <td>
+                  {% if partner.contact_person or partner.phone or partner.email %}
+                    <div class="small">
+                      {% if partner.contact_person %}<div>{{ partner.contact_person }}</div>{% endif %}
+                      {% if partner.phone %}<div>{{ partner.phone }}</div>{% endif %}
+                      {% if partner.email %}<div>{{ partner.email }}</div>{% endif %}
+                    </div>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>
+                  {% if can_add %}
+                    <div class="row-actions">
+                      <a class="btn btn-sm btn-outline-secondary" href="{% url 'partners:edit' partner.id %}">Edit</a>
+                      <form method="post" action="{% url 'partners:delete' partner.id %}" onsubmit="return confirm('Delete this vendor/buyer?');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                      </form>
+                    </div>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="7">No partners added yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% include "partials/pagination.html" with page_obj=page_obj %}
+  </div>
+</div>
+
+{% if can_add %}
+  <div class="modal fade" id="uploadPartnerCsvModal" tabindex="-1" aria-labelledby="uploadPartnerCsvModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0" id="uploadPartnerCsvModalLabel">Upload Vendor CSV</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form method="post" enctype="multipart/form-data">
+          <div class="modal-body vstack gap-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="upload_csv">
+            <div class="small text-muted">
+              Template downloads when you click Upload CSV. You can also download it again below.
+            </div>
+            <a class="btn btn-sm btn-outline-secondary align-self-start" href="{% url 'partners:csv_template' %}">
+              Download Template CSV
+            </a>
+            <div>
+              <label class="form-label">{{ csv_form.csv_file.label }}</label>
+              {{ csv_form.csv_file }}
+              {% for error in csv_form.csv_file.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" type="submit">Upload</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="createPartnerModal" tabindex="-1" aria-labelledby="createPartnerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0" id="createPartnerModalLabel">Add Vendor / Buyer</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form method="post">
+          <div class="modal-body">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_partner">
+            <div class="row g-2">
+              {% for field in form %}
+                <div class="col-12 col-md-6">
+                  <label class="form-label">{{ field.label }}</label>
+                  {{ field }}
+                  {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+              {% endfor %}
+            </div>
+            {% if form.non_field_errors %}
+              <div class="text-danger small mt-2">{{ form.non_field_errors|join:', ' }}</div>
+            {% endif %}
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" type="submit">Save Partner</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {% if can_add %}
+    <script>
+      (() => {
+        const button = document.getElementById("uploadPartnerCsvBtn");
+        if (!button) {
+          return;
+        }
+        const triggerTemplateDownload = (url) => {
+          if (!url) {
+            return;
+          }
+          const frame = document.createElement("iframe");
+          frame.style.display = "none";
+          frame.src = url;
+          document.body.appendChild(frame);
+          setTimeout(() => frame.remove(), 3000);
+        };
+        button.addEventListener("click", () => {
+          triggerTemplateDownload(button.dataset.templateUrl || "");
+        });
+      })();
+    </script>
+  {% endif %}
+
+  {% if show_create_modal and can_add %}
+    <script>
+      (() => {
+        const modalEl = document.getElementById("createPartnerModal");
+        if (!modalEl) {
+          return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
+
+  {% if show_csv_modal and can_add %}
+    <script>
+      (() => {
+        const modalEl = document.getElementById("uploadPartnerCsvModal");
+        if (!modalEl) {
+          return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
+{% endblock %}

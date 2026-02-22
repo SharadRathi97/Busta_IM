@@ -1,0 +1,223 @@
+{% extends 'base.html' %}
+{% load query_helpers %}
+{% block title %}MRO Inventory | Busta IM{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 mb-0">MRO Inventory</h1>
+  {% if can_manage %}
+    <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#createMroItemModal">
+      Add MRO Item
+    </button>
+  {% endif %}
+</div>
+
+<form method="get" class="card card-soft mb-3 filters-sticky">
+  <div class="card-body">
+    <input type="hidden" name="sort" value="{{ sort_key }}">
+    <input type="hidden" name="direction" value="{{ sort_direction }}">
+    {% url 'inventory:mro_list' as reset_mro_url %}
+    <div class="row g-2">
+      {% include "partials/search_field.html" with label="Search MRO Items" value=filter_values.q placeholder="Search MRO ID, item, code, location, supplier" %}
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1">Item Type</label>
+        <select name="item_type" class="form-select form-select-sm">
+          <option value="">All Types</option>
+          {% for value, label in item_type_choices %}
+            <option value="{{ value }}" {% if filter_values.item_type == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1">Supplier</label>
+        <select name="vendor" class="form-select form-select-sm">
+          <option value="">All Suppliers</option>
+          {% for supplier in supplier_choices %}
+            <option value="{{ supplier.id }}" {% if filter_values.vendor == supplier.id|stringformat:'s' %}selected{% endif %}>
+              {{ supplier.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1">Stock State</label>
+        <select name="stock" class="form-select form-select-sm">
+          <option value="">All Stock</option>
+          <option value="low" {% if filter_values.stock == 'low' %}selected{% endif %}>Low Stock</option>
+          <option value="healthy" {% if filter_values.stock == 'healthy' %}selected{% endif %}>Healthy Stock</option>
+        </select>
+      </div>
+      {% include "partials/filter_actions.html" with reset_href=reset_mro_url reset_col_class="col-12 col-md-2" %}
+    </div>
+  </div>
+</form>
+
+<div class="card card-soft">
+  <div class="card-body">
+    <div class="table-tools">
+      <div class="table-meta">{{ page_obj.paginator.count }} items</div>
+      <div class="table-meta">Click column headers to sort</div>
+    </div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-sm table-minimal table-col-separators align-middle">
+          <thead>
+            <tr>
+              <th><a class="sort-link {% if sort_state.id.active %}active{% endif %}" href="{% replace_query request sort='id' direction=sort_state.id.next page='' %}">ID {{ sort_state.id.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.mro_id.active %}active{% endif %}" href="{% replace_query request sort='mro_id' direction=sort_state.mro_id.next page='' %}">MRO ID {{ sort_state.mro_id.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.item.active %}active{% endif %}" href="{% replace_query request sort='item' direction=sort_state.item.next page='' %}">Item {{ sort_state.item.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.code.active %}active{% endif %}" href="{% replace_query request sort='code' direction=sort_state.code.next page='' %}">Code {{ sort_state.code.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.type.active %}active{% endif %}" href="{% replace_query request sort='type' direction=sort_state.type.next page='' %}">Type {{ sort_state.type.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.stock.active %}active{% endif %}" href="{% replace_query request sort='stock' direction=sort_state.stock.next page='' %}">Stock {{ sort_state.stock.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.cost.active %}active{% endif %}" href="{% replace_query request sort='cost' direction=sort_state.cost.next page='' %}">Cost / Unit {{ sort_state.cost.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.reorder.active %}active{% endif %}" href="{% replace_query request sort='reorder' direction=sort_state.reorder.next page='' %}">Reorder {{ sort_state.reorder.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.location.active %}active{% endif %}" href="{% replace_query request sort='location' direction=sort_state.location.next page='' %}">Location {{ sort_state.location.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.supplier.active %}active{% endif %}" href="{% replace_query request sort='supplier' direction=sort_state.supplier.next page='' %}">Supplier {{ sort_state.supplier.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.adjust.active %}active{% endif %}" href="{% replace_query request sort='adjust' direction=sort_state.adjust.next page='' %}">Adjust {{ sort_state.adjust.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.actions.active %}active{% endif %}" href="{% replace_query request sort='actions' direction=sort_state.actions.next page='' %}">Actions {{ sort_state.actions.icon }}</a></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+              <tr class="{% if item.is_low_stock %}low-stock{% endif %}">
+                <td>{{ item.id }}</td>
+                <td>{{ item.mro_id }}</td>
+                <td>{{ item.name }}</td>
+                <td>{{ item.code }}</td>
+                <td><span class="badge badge-soft">{{ item.get_item_type_display }}</span></td>
+                <td>{{ item.current_stock }} {{ item.unit }}</td>
+                <td>{{ item.cost_per_unit|floatformat:3 }}</td>
+                <td>{{ item.reorder_level }}</td>
+                <td>{{ item.location|default:"-" }}</td>
+                <td>{{ item.vendor.name }}</td>
+                <td>
+                  {% if can_manage %}
+                    <form method="post" action="{% url 'inventory:mro_adjust' %}" class="inline-form">
+                      {% csrf_token %}
+                      <input type="hidden" name="item_id" value="{{ item.id }}">
+                      <input type="number" name="delta" class="form-control form-control-sm" placeholder="+/-" step="0.001" required>
+                      <input type="text" name="reason" class="form-control form-control-sm" placeholder="Reason" required>
+                      <button type="submit" class="btn btn-sm btn-outline-primary">Apply</button>
+                    </form>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>
+                  {% if can_manage %}
+                    <div class="row-actions">
+                      <a class="btn btn-sm btn-outline-secondary" href="{% url 'inventory:mro_edit' item.id %}">Edit</a>
+                      <form method="post" action="{% url 'inventory:mro_delete' item.id %}" onsubmit="return confirm('Delete this MRO item?');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                      </form>
+                    </div>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="12">No MRO items found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% include "partials/pagination.html" with page_obj=page_obj %}
+  </div>
+</div>
+
+{% if can_manage %}
+  <div class="modal fade" id="createMroItemModal" tabindex="-1" aria-labelledby="createMroItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0" id="createMroItemModalLabel">Add MRO Item</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form method="post">
+          <div class="modal-body vstack gap-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_mro_item">
+            <div class="row g-2">
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.name.label }}</label>
+                {{ create_form.name }}
+                {% for error in create_form.name.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.mro_id.label }}</label>
+                {{ create_form.mro_id }}
+                {% for error in create_form.mro_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.code.label }}</label>
+                {{ create_form.code }}
+                {% if create_form.code.help_text %}<div class="form-help">{{ create_form.code.help_text }}</div>{% endif %}
+                {% for error in create_form.code.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.item_type.label }}</label>
+                {{ create_form.item_type }}
+                {% for error in create_form.item_type.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.unit.label }}</label>
+                {{ create_form.unit }}
+                {% for error in create_form.unit.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.opening_stock.label }}</label>
+                {{ create_form.opening_stock }}
+                {% for error in create_form.opening_stock.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.cost_per_unit.label }}</label>
+                {{ create_form.cost_per_unit }}
+                {% for error in create_form.cost_per_unit.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.reorder_level.label }}</label>
+                {{ create_form.reorder_level }}
+                {% for error in create_form.reorder_level.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.vendor.label }}</label>
+                {{ create_form.vendor }}
+                {% for error in create_form.vendor.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label">{{ create_form.location.label }}</label>
+                {{ create_form.location }}
+                {% for error in create_form.location.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+            </div>
+            {% if create_form.non_field_errors %}
+              <div class="text-danger small">{{ create_form.non_field_errors|join:', ' }}</div>
+            {% endif %}
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" type="submit">Create Item</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {% if show_create_modal and can_manage %}
+    <script>
+      (() => {
+        const modalEl = document.getElementById("createMroItemModal");
+        if (!modalEl) {
+          return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
+{% endblock %}

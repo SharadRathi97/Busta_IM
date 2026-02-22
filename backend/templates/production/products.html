@@ -1,0 +1,445 @@
+{% extends 'base.html' %}
+{% block title %}Products & BOM | Busta IM{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Finished Products & BOM</h1>
+
+{% if can_manage %}
+<div class="row g-3 mb-3">
+  <div class="col-12 col-xl-4">
+    <div class="card card-soft">
+      <div class="card-body">
+        <h2 class="h5">Add Finished Product</h2>
+        <form method="post" class="vstack gap-2">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add_product">
+          {% for field in product_form %}
+            <div>
+              <label class="form-label">{{ field.label }}</label>
+              {{ field }}
+              {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+          {% endfor %}
+          <button class="btn btn-primary" type="submit">Add Product</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8 d-flex align-items-start justify-content-xl-end">
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-primary" id="uploadBomCsvBtn" type="button" data-template-url="{% url 'production:bom_csv_template' %}" data-bs-toggle="modal" data-bs-target="#uploadBomCsvModal">
+        Upload CSV
+      </button>
+      <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#addBomModal">
+        Add BOM
+      </button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card card-soft">
+  <div class="card-body">
+    <h2 class="h5">Finished Products</h2>
+    <div class="table-meta mb-2">Click a product name to view BOM mappings.</div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>SKU</th>
+              <th>BOM Items</th>
+              {% if can_manage %}<th>Actions</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in products %}
+              <tr>
+                <td>{{ p.id }}</td>
+                <td>
+                  <button class="btn btn-link btn-sm p-0 align-baseline text-start" type="button" data-bs-toggle="modal" data-bs-target="#bomModal{{ p.id }}">
+                    {{ p.name }}
+                  </button>
+                </td>
+                <td>{{ p.sku }}</td>
+                <td><span class="badge badge-soft">{{ p.bom_items.all|length }}</span></td>
+                {% if can_manage %}
+                  <td>
+                    <form method="post" action="{% url 'production:delete_product' p.id %}" onsubmit="return confirm('Delete this finished product? Its BOM mappings will also be removed.');">
+                      {% csrf_token %}
+                      <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                    </form>
+                  </td>
+                {% endif %}
+              </tr>
+            {% empty %}
+              <tr><td colspan="{% if can_manage %}5{% else %}4{% endif %}">No products found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if can_manage %}
+  <div class="modal fade" id="uploadBomCsvModal" tabindex="-1" aria-labelledby="uploadBomCsvModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0" id="uploadBomCsvModalLabel">Upload BOM CSV</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form method="post" enctype="multipart/form-data">
+          <div class="modal-body vstack gap-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="upload_bom_csv">
+            <div class="small text-muted">
+              Template downloads when you click Upload CSV. You can also download it again below.
+            </div>
+            <a class="btn btn-sm btn-outline-secondary align-self-start" href="{% url 'production:bom_csv_template' %}">
+              Download Template CSV
+            </a>
+            <div>
+              <label class="form-label">{{ csv_form.csv_file.label }}</label>
+              {{ csv_form.csv_file }}
+              {% for error in csv_form.csv_file.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" type="submit">Upload</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="addBomModal" tabindex="-1" aria-labelledby="addBomModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0" id="addBomModalLabel">Add BOM Items</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form method="post" id="bulkBomForm">
+          <div class="modal-body">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add_bom_bulk">
+            <div class="table-shell">
+              <div class="table-responsive">
+                <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th style="min-width: 260px;">Finished Product</th>
+                      <th style="min-width: 280px;">Raw Material</th>
+                      <th style="min-width: 160px;">Qty / Unit</th>
+                      <th style="width: 80px;">Row</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bomBulkRows"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="form-help mt-2">Select a product first. Material options update for that product.</div>
+          </div>
+          <div class="modal-footer justify-content-between">
+            <button class="btn btn-sm btn-outline-primary" type="button" id="addBomRowBtn">Add Row</button>
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button class="btn btn-primary" type="submit">Save BOM Rows</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{% for p in products %}
+  <div class="modal fade" id="bomModal{{ p.id }}" tabindex="-1" aria-labelledby="bomModalLabel{{ p.id }}" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title h5 mb-0" id="bomModalLabel{{ p.id }}">BOM for {{ p.name }}</h2>
+            <div class="d-flex gap-2 mt-2">
+              <a class="btn btn-sm btn-outline-success" href="{% url 'production:export_bom_excel' p.id %}">Download Excel</a>
+              <a class="btn btn-sm btn-outline-danger" href="{% url 'production:export_bom_pdf' p.id %}">Download PDF</a>
+            </div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          {% if p.bom_items.all|length %}
+            <div class="table-shell">
+              <div class="table-responsive">
+                <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Raw Material</th>
+                      <th>Qty / Unit</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for item in p.bom_items.all %}
+                      <tr>
+                        <td>{{ item.material.name }}</td>
+                        <td>{{ item.qty_per_unit }} {{ item.material.unit }}</td>
+                        <td>
+                          {% if can_manage %}
+                            <div class="row-actions">
+                              <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#editBom{{ item.id }}" aria-expanded="false" aria-controls="editBom{{ item.id }}">
+                                Edit
+                              </button>
+                              <form method="post" action="{% url 'production:delete_bom' item.id %}" onsubmit="return confirm('Delete this BOM item?');">
+                                {% csrf_token %}
+                                <input type="hidden" name="product_id" value="{{ p.id }}">
+                                <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                              </form>
+                            </div>
+                            <div class="collapse mt-2" id="editBom{{ item.id }}">
+                              <form method="post" action="{% url 'production:update_bom' item.id %}" class="row g-2 align-items-end">
+                                {% csrf_token %}
+                                <input type="hidden" name="product_id" value="{{ p.id }}">
+                                <div class="col-12">
+                                  <label class="form-label mb-1">Raw Material</label>
+                                  <select class="form-select form-select-sm" name="material" required>
+                                    {% for material in bom_material_choices %}
+                                      <option value="{{ material.id }}" {% if material.id == item.material_id %}selected{% endif %}>
+                                        {{ material.name }} ({{ material.code }})
+                                      </option>
+                                    {% endfor %}
+                                  </select>
+                                </div>
+                                <div class="col-12 col-md-7">
+                                  <label class="form-label mb-1">Qty / Unit</label>
+                                  <input class="form-control form-control-sm" type="number" name="qty_per_unit" min="0.001" step="0.001" value="{{ item.qty_per_unit|floatformat:3 }}" required>
+                                </div>
+                                <div class="col-12 col-md-5">
+                                  <button class="btn btn-sm btn-primary w-100" type="submit">Save</button>
+                                </div>
+                              </form>
+                            </div>
+                          {% else %}
+                            -
+                          {% endif %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {% else %}
+            <div class="text-muted">No BOM mappings defined for this product.</div>
+          {% endif %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+  {% if can_manage %}
+    <script>
+      (() => {
+        const button = document.getElementById("uploadBomCsvBtn");
+        if (!button) {
+          return;
+        }
+        const triggerTemplateDownload = (url) => {
+          if (!url) {
+            return;
+          }
+          const frame = document.createElement("iframe");
+          frame.style.display = "none";
+          frame.src = url;
+          document.body.appendChild(frame);
+          setTimeout(() => frame.remove(), 3000);
+        };
+        button.addEventListener("click", () => {
+          triggerTemplateDownload(button.dataset.templateUrl || "");
+        });
+      })();
+    </script>
+
+    {{ product_choices|json_script:"bomProductChoicesData" }}
+    {{ product_material_map|json_script:"bomProductMaterialMapData" }}
+    {{ bom_bulk_rows|json_script:"bomBulkRowsSeedData" }}
+    <script>
+      (() => {
+        const rowsBody = document.getElementById("bomBulkRows");
+        const addRowBtn = document.getElementById("addBomRowBtn");
+        const productChoicesNode = document.getElementById("bomProductChoicesData");
+        const materialMapNode = document.getElementById("bomProductMaterialMapData");
+        const seedRowsNode = document.getElementById("bomBulkRowsSeedData");
+        if (!rowsBody || !addRowBtn || !productChoicesNode || !materialMapNode || !seedRowsNode) {
+          return;
+        }
+
+        const productChoices = JSON.parse(productChoicesNode.textContent || "[]");
+        const productMaterialMap = JSON.parse(materialMapNode.textContent || "{}");
+        const seedRows = JSON.parse(seedRowsNode.textContent || "[]");
+
+        const makeOption = (value, label, selected) => {
+          const option = document.createElement("option");
+          option.value = String(value);
+          option.textContent = label;
+          option.selected = !!selected;
+          return option;
+        };
+
+        const setMaterialOptions = (selectEl, productId, selectedMaterialId) => {
+          selectEl.replaceChildren();
+          const selectedId = String(selectedMaterialId || "");
+          if (!productId) {
+            selectEl.disabled = true;
+            selectEl.appendChild(makeOption("", "Select product first", true));
+            return;
+          }
+
+          const options = productMaterialMap[String(productId)] || [];
+          if (!options.length) {
+            selectEl.disabled = true;
+            selectEl.appendChild(makeOption("", "No available materials", true));
+            return;
+          }
+
+          selectEl.disabled = false;
+          selectEl.appendChild(makeOption("", "Select material", selectedId === ""));
+          options.forEach((optionItem) => {
+            const optionValue = String(optionItem.id);
+            selectEl.appendChild(makeOption(optionValue, optionItem.label, optionValue === selectedId));
+          });
+        };
+
+        const createRow = (rowData) => {
+          const row = document.createElement("tr");
+
+          const productCell = document.createElement("td");
+          const materialCell = document.createElement("td");
+          const qtyCell = document.createElement("td");
+          const removeCell = document.createElement("td");
+
+          const productSelect = document.createElement("select");
+          productSelect.name = "bom_product";
+          productSelect.className = "form-select form-select-sm";
+          productSelect.required = true;
+          productSelect.appendChild(makeOption("", "Select product", !rowData.product));
+          productChoices.forEach((optionItem) => {
+            const optionValue = String(optionItem.id);
+            productSelect.appendChild(makeOption(optionValue, optionItem.label, optionValue === String(rowData.product || "")));
+          });
+
+          const materialSelect = document.createElement("select");
+          materialSelect.name = "bom_material";
+          materialSelect.className = "form-select form-select-sm";
+          materialSelect.required = true;
+
+          const qtyInput = document.createElement("input");
+          qtyInput.name = "bom_qty";
+          qtyInput.type = "number";
+          qtyInput.min = "0.001";
+          qtyInput.step = "0.001";
+          qtyInput.required = true;
+          qtyInput.className = "form-control form-control-sm";
+          qtyInput.value = rowData.qty_per_unit || "";
+
+          const removeBtn = document.createElement("button");
+          removeBtn.type = "button";
+          removeBtn.className = "btn btn-sm btn-outline-danger";
+          removeBtn.textContent = "Remove";
+          removeBtn.setAttribute("data-remove-row", "1");
+
+          productSelect.addEventListener("change", () => {
+            setMaterialOptions(materialSelect, productSelect.value, "");
+          });
+
+          setMaterialOptions(materialSelect, productSelect.value, rowData.material || "");
+
+          productCell.appendChild(productSelect);
+          materialCell.appendChild(materialSelect);
+          qtyCell.appendChild(qtyInput);
+          removeCell.appendChild(removeBtn);
+
+          row.appendChild(productCell);
+          row.appendChild(materialCell);
+          row.appendChild(qtyCell);
+          row.appendChild(removeCell);
+          rowsBody.appendChild(row);
+        };
+
+        rowsBody.addEventListener("click", (event) => {
+          const removeBtn = event.target.closest("[data-remove-row]");
+          if (!removeBtn) {
+            return;
+          }
+          if (rowsBody.querySelectorAll("tr").length <= 1) {
+            return;
+          }
+          const row = removeBtn.closest("tr");
+          if (row) {
+            row.remove();
+          }
+        });
+
+        addRowBtn.addEventListener("click", () => {
+          createRow({});
+        });
+
+        if (Array.isArray(seedRows) && seedRows.length) {
+          seedRows.forEach((rowData) => createRow(rowData || {}));
+        } else {
+          createRow({});
+        }
+      })();
+    </script>
+  {% endif %}
+
+  {% if open_bom_id %}
+    <script>
+      (() => {
+        const modalEl = document.getElementById("bomModal{{ open_bom_id }}");
+        if (!modalEl) {
+          return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
+
+  {% if show_add_bom_modal and can_manage %}
+    <script>
+      (() => {
+        const modalEl = document.getElementById("addBomModal");
+        if (!modalEl) {
+          return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
+
+  {% if show_upload_csv_modal and can_manage %}
+    <script>
+      (() => {
+        const modalEl = document.getElementById("uploadBomCsvModal");
+        if (!modalEl) {
+          return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
+{% endblock %}
