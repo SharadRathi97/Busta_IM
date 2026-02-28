@@ -182,6 +182,9 @@ Deployment templates:
 - `deploy/nginx/busta-im.conf`
 - `backend/.env.example`
 
+Oracle Cloud deployment guide:
+- `DEPLOYMENT_README.md` (see `## 10. Oracle Cloud Deployment (Step-by-Step + PostgreSQL)`)
+
 ## Notes
 
 - Legacy non-framework implementation backup is kept at `backend_legacy_stdlib/`.
