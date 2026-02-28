@@ -5,6 +5,7 @@ from django.db.models import Sum
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 
+from accounts.models import User
 from inventory.models import InventoryLedger, RawMaterial
 from partners.models import Partner
 from purchasing.models import PurchaseOrder
@@ -28,7 +29,15 @@ def home(request):
     open_purchase_orders = PurchaseOrder.objects.filter(
         status__in=[PurchaseOrder.Status.OPEN, PurchaseOrder.Status.PARTIALLY_RECEIVED]
     ).count()
-    low_stock_items = RawMaterial.objects.filter(current_stock__lte=models.F("reorder_level")).order_by("current_stock")[:10]
+    low_stock_qs = RawMaterial.objects.filter(current_stock__lte=models.F("reorder_level")).order_by("current_stock", "name")
+    low_stock_items = list(low_stock_qs[:10])
+    low_stock_modal_items = list(low_stock_qs[:50])
+    show_modal_after_login = bool(request.session.pop("show_low_stock_modal", False))
+    show_low_stock_modal = (
+        request.user.role == User.Role.ADMIN
+        and bool(low_stock_modal_items)
+        and show_modal_after_login
+    )
     recent_ledger = InventoryLedger.objects.select_related("material", "created_by")[:10]
 
     context = {
@@ -41,6 +50,8 @@ def home(request):
         "total_production_scrap": total_production_scrap,
         "open_purchase_orders": open_purchase_orders,
         "low_stock_items": low_stock_items,
+        "low_stock_modal_items": low_stock_modal_items,
+        "show_low_stock_modal": show_low_stock_modal,
         "recent_ledger": recent_ledger,
     }
     return render(request, "dashboard/home.html", context)

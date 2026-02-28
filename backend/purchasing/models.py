@@ -15,16 +15,52 @@ from partners.models import Partner
 
 
 class PurchaseOrder(models.Model):
+    DEFAULT_DELIVERY_TERMS = "As per Schedule"
+    DEFAULT_PACKAGING_IDENT_TERMS = "Included"
+    DEFAULT_INSPECTION_REPORT_TERMS = "Along with Material"
+    DEFAULT_PACKING_TERMS = "Standard Packing"
+    DEFAULT_PAYMENT_PDC_DAYS = 45
+
     class Status(models.TextChoices):
         OPEN = "open", "Open"
         PARTIALLY_RECEIVED = "partially_received", "Partially Received"
         RECEIVED = "received", "Received"
         CANCELLED = "cancelled", "Cancelled"
 
+    class FreightTerms(models.TextChoices):
+        EXTRA_AS_APPLICABLE = "extra_as_applicable", "Extra as applicable"
+        INCLUDED = "included", "Included"
+
     vendor = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="purchase_orders")
     order_date = models.DateField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
     notes = models.CharField(max_length=255, blank=True)
+    payment_pdc_days = models.PositiveIntegerField(default=DEFAULT_PAYMENT_PDC_DAYS)
+    delivery_terms = models.CharField(max_length=100, default=DEFAULT_DELIVERY_TERMS)
+    freight_terms = models.CharField(
+        max_length=32,
+        choices=FreightTerms.choices,
+        default=FreightTerms.EXTRA_AS_APPLICABLE,
+    )
+    packaging_ident_terms = models.CharField(max_length=100, default=DEFAULT_PACKAGING_IDENT_TERMS)
+    inspection_report_terms = models.CharField(max_length=100, default=DEFAULT_INSPECTION_REPORT_TERMS)
+    packing_terms = models.CharField(max_length=100, default=DEFAULT_PACKING_TERMS)
+    inventory_approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="inventory_approved_purchase_orders",
+    )
+    inventory_approved_at = models.DateTimeField(null=True, blank=True)
+    admin_approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="admin_approved_purchase_orders",
+    )
+    admin_approved_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     received_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -62,11 +98,21 @@ class PurchaseOrder(models.Model):
     def can_reopen(self) -> bool:
         return self.status == self.Status.CANCELLED
 
+    @property
+    def is_fully_approved(self) -> bool:
+        return bool(self.inventory_approved_at and self.admin_approved_at)
+
+    @property
+    def is_pending_approval(self) -> bool:
+        return not self.is_fully_approved
+
 
 class PurchaseOrderItem(models.Model):
     purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name="items")
     material = models.ForeignKey(RawMaterial, on_delete=models.PROTECT)
     quantity = models.DecimalField(max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))])
+    unit_rate = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
+    line_amount = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     received_quantity = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     unit = models.CharField(max_length=16)
 
@@ -85,13 +131,31 @@ class PurchaseLineInput:
     quantity: Decimal
 
 
-def create_grouped_purchase_orders(*, order_date, notes: str, created_by, lines: list[PurchaseLineInput]) -> list[PurchaseOrder]:
+def create_grouped_purchase_orders(
+    *,
+    order_date,
+    notes: str,
+    created_by,
+    lines: list[PurchaseLineInput],
+    payment_pdc_days: int = PurchaseOrder.DEFAULT_PAYMENT_PDC_DAYS,
+    delivery_terms: str = PurchaseOrder.DEFAULT_DELIVERY_TERMS,
+    freight_terms: str = PurchaseOrder.FreightTerms.EXTRA_AS_APPLICABLE,
+    packaging_ident_terms: str = PurchaseOrder.DEFAULT_PACKAGING_IDENT_TERMS,
+    inspection_report_terms: str = PurchaseOrder.DEFAULT_INSPECTION_REPORT_TERMS,
+    packing_terms: str = PurchaseOrder.DEFAULT_PACKING_TERMS,
+) -> list[PurchaseOrder]:
     return create_grouped_purchase_orders_with_vendor(
         order_date=order_date,
         notes=notes,
         created_by=created_by,
         lines=lines,
         vendor=None,
+        payment_pdc_days=payment_pdc_days,
+        delivery_terms=delivery_terms,
+        freight_terms=freight_terms,
+        packaging_ident_terms=packaging_ident_terms,
+        inspection_report_terms=inspection_report_terms,
+        packing_terms=packing_terms,
     )
 
 
@@ -102,6 +166,12 @@ def create_grouped_purchase_orders_with_vendor(
     created_by,
     lines: list[PurchaseLineInput],
     vendor: Partner | None,
+    payment_pdc_days: int = PurchaseOrder.DEFAULT_PAYMENT_PDC_DAYS,
+    delivery_terms: str = PurchaseOrder.DEFAULT_DELIVERY_TERMS,
+    freight_terms: str = PurchaseOrder.FreightTerms.EXTRA_AS_APPLICABLE,
+    packaging_ident_terms: str = PurchaseOrder.DEFAULT_PACKAGING_IDENT_TERMS,
+    inspection_report_terms: str = PurchaseOrder.DEFAULT_INSPECTION_REPORT_TERMS,
+    packing_terms: str = PurchaseOrder.DEFAULT_PACKING_TERMS,
 ) -> list[PurchaseOrder]:
     if not lines:
         raise ValidationError("Add at least one raw material line item.")
@@ -118,13 +188,22 @@ def create_grouped_purchase_orders_with_vendor(
                 vendor=vendor,
                 order_date=order_date,
                 notes=notes,
+                payment_pdc_days=payment_pdc_days,
+                delivery_terms=delivery_terms,
+                freight_terms=freight_terms,
+                packaging_ident_terms=packaging_ident_terms,
+                inspection_report_terms=inspection_report_terms,
+                packing_terms=packing_terms,
                 created_by=created_by,
             )
             for line in lines:
+                unit_rate = line.material.cost_per_unit
                 PurchaseOrderItem.objects.create(
                     purchase_order=order,
                     material=line.material,
                     quantity=line.quantity,
+                    unit_rate=unit_rate,
+                    line_amount=(line.quantity * unit_rate),
                     unit=line.material.unit,
                 )
         return [order]
@@ -141,13 +220,22 @@ def create_grouped_purchase_orders_with_vendor(
                 vendor=grouped_vendor,
                 order_date=order_date,
                 notes=notes,
+                payment_pdc_days=payment_pdc_days,
+                delivery_terms=delivery_terms,
+                freight_terms=freight_terms,
+                packaging_ident_terms=packaging_ident_terms,
+                inspection_report_terms=inspection_report_terms,
+                packing_terms=packing_terms,
                 created_by=created_by,
             )
             for line in vendor_lines:
+                unit_rate = line.material.cost_per_unit
                 PurchaseOrderItem.objects.create(
                     purchase_order=order,
                     material=line.material,
                     quantity=line.quantity,
+                    unit_rate=unit_rate,
+                    line_amount=(line.quantity * unit_rate),
                     unit=line.material.unit,
                 )
             created_orders.append(order)
@@ -285,4 +373,30 @@ def reopen_purchase_order(*, purchase_order: PurchaseOrder) -> PurchaseOrder:
         locked_order.cancelled_at = None
         locked_order.save(update_fields=["status", "cancelled_by", "cancelled_at"])
 
+    return locked_order
+
+
+def approve_purchase_order_inventory(*, purchase_order: PurchaseOrder, approved_by) -> PurchaseOrder:
+    with transaction.atomic():
+        locked_order = PurchaseOrder.objects.select_for_update().get(pk=purchase_order.pk)
+        if locked_order.status == PurchaseOrder.Status.CANCELLED:
+            raise ValidationError("Cancelled purchase order cannot be approved.")
+        if locked_order.inventory_approved_at:
+            raise ValidationError("Purchase order is already approved by inventory manager.")
+        locked_order.inventory_approved_by = approved_by
+        locked_order.inventory_approved_at = timezone.now()
+        locked_order.save(update_fields=["inventory_approved_by", "inventory_approved_at"])
+    return locked_order
+
+
+def approve_purchase_order_admin(*, purchase_order: PurchaseOrder, approved_by) -> PurchaseOrder:
+    with transaction.atomic():
+        locked_order = PurchaseOrder.objects.select_for_update().get(pk=purchase_order.pk)
+        if locked_order.status == PurchaseOrder.Status.CANCELLED:
+            raise ValidationError("Cancelled purchase order cannot be approved.")
+        if locked_order.admin_approved_at:
+            raise ValidationError("Purchase order is already approved by admin.")
+        locked_order.admin_approved_by = approved_by
+        locked_order.admin_approved_at = timezone.now()
+        locked_order.save(update_fields=["admin_approved_by", "admin_approved_at"])
     return locked_order

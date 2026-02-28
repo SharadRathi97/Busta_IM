@@ -7,7 +7,7 @@ from django.db.models import Q
 from inventory.models import RawMaterial
 from partners.models import Partner
 
-from .models import PurchaseLineInput, PurchaseOrderItem
+from .models import PurchaseLineInput, PurchaseOrder, PurchaseOrderItem
 
 
 class PurchaseOrderCreateForm(forms.Form):
@@ -17,12 +17,44 @@ class PurchaseOrderCreateForm(forms.Form):
     )
     order_date = forms.DateField(widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}))
     notes = forms.CharField(required=False, max_length=255, widget=forms.TextInput(attrs={"class": "form-control"}))
+    payment_pdc_days = forms.IntegerField(
+        min_value=0,
+        label="Payments (PDC against N days)",
+        widget=forms.NumberInput(attrs={"class": "form-control", "min": "0", "step": "1"}),
+    )
+    delivery_terms = forms.CharField(
+        label="Delivery",
+        widget=forms.TextInput(attrs={"class": "form-control", "readonly": "readonly"}),
+    )
+    freight_terms = forms.ChoiceField(
+        label="Freight",
+        choices=PurchaseOrder.FreightTerms.choices,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    packaging_ident_terms = forms.CharField(
+        label="Packaging/Ident",
+        widget=forms.TextInput(attrs={"class": "form-control", "readonly": "readonly"}),
+    )
+    inspection_report_terms = forms.CharField(
+        label="Inspection Report",
+        widget=forms.TextInput(attrs={"class": "form-control", "readonly": "readonly"}),
+    )
+    packing_terms = forms.CharField(
+        label="Packing",
+        widget=forms.TextInput(attrs={"class": "form-control", "readonly": "readonly"}),
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["vendor"].queryset = Partner.objects.filter(
             partner_type__in=[Partner.PartnerType.SUPPLIER, Partner.PartnerType.BOTH]
         ).order_by("name")
+        self.fields["payment_pdc_days"].initial = PurchaseOrder.DEFAULT_PAYMENT_PDC_DAYS
+        self.fields["delivery_terms"].initial = PurchaseOrder.DEFAULT_DELIVERY_TERMS
+        self.fields["freight_terms"].initial = PurchaseOrder.FreightTerms.EXTRA_AS_APPLICABLE
+        self.fields["packaging_ident_terms"].initial = PurchaseOrder.DEFAULT_PACKAGING_IDENT_TERMS
+        self.fields["inspection_report_terms"].initial = PurchaseOrder.DEFAULT_INSPECTION_REPORT_TERMS
+        self.fields["packing_terms"].initial = PurchaseOrder.DEFAULT_PACKING_TERMS
 
 
 class PurchaseLineForm(forms.Form):

@@ -141,4 +141,69 @@
     </div>
   </div>
 </div>
+
+{% if show_low_stock_modal %}
+  <div class="modal fade" id="lowStockModal" tabindex="-1" aria-labelledby="lowStockModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0" id="lowStockModalLabel">Low Stock Raw Materials</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small text-muted mb-3">
+            These materials are at or below minimum stock and need replenishment.
+          </p>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>Material</th>
+                  <th>Code</th>
+                  <th>Stock</th>
+                  <th>Reorder</th>
+                  <th>Unit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in low_stock_modal_items %}
+                  <tr class="low-stock">
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.code }}</td>
+                    <td>{{ item.current_stock|floatformat:3 }}</td>
+                    <td>{{ item.reorder_level|floatformat:3 }}</td>
+                    <td>{{ item.unit }}</td>
+                  </tr>
+                {% empty %}
+                  <tr>
+                    <td colspan="5">No low stock alerts.</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <a href="{% url 'production:orders' %}" class="btn btn-primary">Go to Production Orders</a>
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {% if show_low_stock_modal %}
+    <script>
+      (() => {
+        const modalElement = document.getElementById("lowStockModal");
+        if (!modalElement || !window.bootstrap) {
+          return;
+        }
+        const modal = new window.bootstrap.Modal(modalElement);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
 {% endblock %}

@@ -1,9 +1,45 @@
+# Python
 .venv/
+venv/
+env/
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Test and cache artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Django/local runtime data
 *.sqlite3
 backend/db.sqlite3
 backend/staticfiles/
-backend/.env
-.DS_Store
+backend/media/
 backend/data/
+backend/.env
+backend/.env.*
+
+# Frontend deps/logs
+frontend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE/OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Secrets and key material
+*.pem
+*.key
+*.key.pub
+*.p12

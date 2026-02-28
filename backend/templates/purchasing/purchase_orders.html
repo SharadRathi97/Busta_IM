@@ -40,16 +40,230 @@
 
       <div class="d-flex gap-2">
         <button type="button" id="add-line" class="btn btn-outline-secondary" {% if not selected_create_vendor %}disabled{% endif %}>Add Line Item</button>
-        <button type="submit" class="btn btn-primary">Create Purchase Order</button>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createPoTermsModal">Create Purchase Order</button>
+      </div>
+
+      <div class="modal fade" id="createPoTermsModal" tabindex="-1" aria-labelledby="createPoTermsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h3 class="modal-title h5 mb-0" id="createPoTermsModalLabel">Purchase Order Terms</h3>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="vstack gap-3">
+                <div>
+                  <label class="form-label mb-1">Payments</label>
+                  <div class="input-group">
+                    <span class="input-group-text">PDC against</span>
+                    {{ form.payment_pdc_days }}
+                    <span class="input-group-text">days</span>
+                  </div>
+                  {% for error in form.payment_pdc_days.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div>
+                  <label class="form-label mb-1">{{ form.delivery_terms.label }}</label>
+                  {{ form.delivery_terms }}
+                  {% for error in form.delivery_terms.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div>
+                  <label class="form-label mb-1">{{ form.freight_terms.label }}</label>
+                  {{ form.freight_terms }}
+                  {% for error in form.freight_terms.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div>
+                  <label class="form-label mb-1">{{ form.packaging_ident_terms.label }}</label>
+                  {{ form.packaging_ident_terms }}
+                  {% for error in form.packaging_ident_terms.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div>
+                  <label class="form-label mb-1">{{ form.inspection_report_terms.label }}</label>
+                  {{ form.inspection_report_terms }}
+                  {% for error in form.inspection_report_terms.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div>
+                  <label class="form-label mb-1">{{ form.packing_terms.label }}</label>
+                  {{ form.packing_terms }}
+                  {% for error in form.packing_terms.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-primary">Create Purchase Order</button>
+            </div>
+          </div>
+        </div>
       </div>
     </form>
   </div>
 </div>
 {% endif %}
 
+{% if can_manage %}
+<div class="card card-soft mb-3">
+  <div class="card-body">
+    <h2 class="h5 mb-1">Low Stock Purchase Planner</h2>
+    <p class="small text-muted mb-3">Create one purchase order PDF per vendor with all low-stock items in that vendor group.</p>
+    {% if low_stock_vendor_groups %}
+      {% for group in low_stock_vendor_groups %}
+        <div class="border rounded p-2 p-md-3 mb-3">
+          <form id="{{ group.batch_form_id }}" method="post" action="{% url 'purchasing:create_low_stock_batch_po_pdf' %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next_url }}">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h3 class="h6 mb-0">Vendor Group: {{ group.vendor.name }}</h3>
+              <span class="small text-muted">{{ group.rows|length }} item{{ group.rows|pluralize }}</span>
+            </div>
+            <div class="row g-2 align-items-end mb-2">
+              <div class="col-12 col-md-8">
+                <label class="form-label mb-1">Purchase Vendor</label>
+                {% if group.batch_vendor_options|length > 1 %}
+                  <select name="vendor_id" class="form-select form-select-sm">
+                    {% for option in group.batch_vendor_options %}
+                      <option value="{{ option.id }}" {% if option.id == group.default_batch_vendor_id %}selected{% endif %}>
+                        {{ option.name }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                  <div class="small text-muted mt-1">Shown vendors can supply every item in this batch.</div>
+                {% else %}
+                  <input type="hidden" name="vendor_id" value="{{ group.default_batch_vendor_id }}">
+                  <div class="form-control form-control-sm bg-light">{{ group.batch_vendor_options.0.name }}</div>
+                {% endif %}
+              </div>
+              <div class="col-12 col-md-4 d-grid">
+                <button type="submit" class="btn btn-sm btn-outline-primary">Create Vendor PO PDF (Batch)</button>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Material</th>
+                    <th>Code</th>
+                    <th>Stock</th>
+                    <th>Reorder</th>
+                    <th>Qty Required</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in group.rows %}
+                    <tr class="low-stock">
+                      <td>{{ row.material.name }}</td>
+                      <td>{{ row.material.code }}</td>
+                      <td>{{ row.material.current_stock|floatformat:3 }} {{ row.material.unit }}</td>
+                      <td>{{ row.material.reorder_level|floatformat:3 }}</td>
+                      <td>
+                        <input type="hidden" name="material_id" value="{{ row.material.id }}">
+                        <input
+                          type="number"
+                          name="quantity"
+                          class="form-control form-control-sm"
+                          min="0.001"
+                          step="0.001"
+                          placeholder="0.000"
+                          required
+                          value="{{ row.suggested_qty|floatformat:3 }}"
+                        >
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </form>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="alert alert-success mb-0">No low-stock raw materials to purchase right now.</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card card-soft mb-3">
+  <div class="card-body">
+    <h2 class="h5 mb-2">PO Pending Approvals</h2>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Vendor</th>
+            <th>Date</th>
+            <th>Inventory Approval</th>
+            <th>Admin Approval</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for po in pending_approval_orders %}
+            <tr>
+              <td>{{ po.id }}</td>
+              <td>{{ po.vendor.name }}</td>
+              <td>{{ po.order_date }}</td>
+              <td>
+                {% if po.inventory_approved_at %}
+                  <span class="badge text-bg-success">Approved</span>
+                  <div class="small text-muted mt-1">
+                    {{ po.inventory_approved_by.username|default:'-' }} | {{ po.inventory_approved_at|date:'Y-m-d H:i' }}
+                  </div>
+                {% else %}
+                  <span class="badge text-bg-warning">Pending</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if po.admin_approved_at %}
+                  <span class="badge text-bg-success">Approved</span>
+                  <div class="small text-muted mt-1">
+                    {{ po.admin_approved_by.username|default:'-' }} | {{ po.admin_approved_at|date:'Y-m-d H:i' }}
+                  </div>
+                {% else %}
+                  <span class="badge text-bg-warning">Pending</span>
+                {% endif %}
+              </td>
+              <td>
+                <div class="d-flex flex-wrap gap-1">
+                  {% if can_inventory_approve_po and not po.inventory_approved_at %}
+                    <form method="post" action="{% url 'purchasing:approve_inventory' po.id %}">
+                      {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                      <button type="submit" class="btn btn-sm btn-outline-primary">Approve (Inventory)</button>
+                    </form>
+                  {% endif %}
+                  {% if can_admin_approve_po and not po.admin_approved_at %}
+                    <form method="post" action="{% url 'purchasing:approve_admin' po.id %}">
+                      {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                      <button type="submit" class="btn btn-sm btn-outline-dark">Approve (Admin)</button>
+                    </form>
+                  {% endif %}
+                  {% if can_admin_approve_po %}
+                    <form method="post" action="{% url 'purchasing:delete_pending' po.id %}">
+                      {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                      <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this pending purchase order?');">Delete</button>
+                    </form>
+                  {% endif %}
+                  {% if not can_inventory_approve_po and not can_admin_approve_po %}
+                    -
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6">No purchase orders pending approvals.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <div class="card card-soft">
   <div class="card-body">
-    <h2 class="h5">Purchase Order List</h2>
+    <h2 class="h5">Final Purchase Order List</h2>
     {% url 'purchasing:list' as reset_po_url %}
     <form method="get" class="row g-2 mb-3 filters-sticky">
       {% include "partials/search_field.html" with value=filter_values.q placeholder="Search PO ID, vendor, material, notes" %}
@@ -423,6 +637,15 @@
       createRow({});
     }
     syncVendorState();
+
+    const shouldShowTermsModal = {{ show_create_po_terms_modal|yesno:"true,false" }};
+    if (shouldShowTermsModal && window.bootstrap) {
+      const modalElement = document.getElementById("createPoTermsModal");
+      if (modalElement) {
+        const modal = new window.bootstrap.Modal(modalElement);
+        modal.show();
+      }
+    }
   })();
 </script>
 {% endblock %}

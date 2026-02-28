@@ -40,7 +40,7 @@ class DashboardRecentTransactionsTests(TestCase):
             unit=RawMaterial.Unit.KG,
             cost_per_unit=Decimal("10.000"),
             current_stock=Decimal("5.000"),
-            reorder_level=Decimal("2.000"),
+            reorder_level=Decimal("6.000"),
             vendor=self.vendor,
         )
         InventoryLedger.objects.create(
@@ -61,3 +61,28 @@ class DashboardRecentTransactionsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "User")
         self.assertContains(response, "Inventory Actor")
+
+    def test_admin_login_shows_low_stock_modal_once(self):
+        response = self.client.post(
+            reverse("accounts:login"),
+            {
+                "username": self.actor.username,
+                "password": "test12345",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["show_low_stock_modal"])
+        self.assertContains(response, "id=\"lowStockModal\"")
+
+        response_again = self.client.get(reverse("dashboard:home"))
+        self.assertEqual(response_again.status_code, 200)
+        self.assertFalse(response_again.context["show_low_stock_modal"])
+
+    def test_dashboard_without_login_flag_does_not_show_modal(self):
+        self.client.force_login(self.actor)
+        response = self.client.get(reverse("dashboard:home"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["show_low_stock_modal"])

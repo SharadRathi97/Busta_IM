@@ -44,7 +44,10 @@ def login_view(request):
 
     form = LoginForm(request, data=request.POST or None)
     if request.method == "POST" and form.is_valid():
-        login(request, form.get_user())
+        user = form.get_user()
+        login(request, user)
+        if user.role == User.Role.ADMIN:
+            request.session["show_low_stock_modal"] = True
         return redirect("dashboard:home")
 
     return render(request, "accounts/login.html", {"form": form})
