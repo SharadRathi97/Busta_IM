@@ -1,88 +1,71 @@
 # Busta IM (Django MVP)
 
-Inventory and production management application for bag manufacturing.
+Inventory, production, and purchasing workflow system for bag manufacturing.
 
-## Stack
+## Current Scope
+
+- Role-based authentication (`admin`, `inventory_manager`, `production_manager`, `viewer`)
+- Dashboard KPIs and low-stock alerts
+  - Admin users see a low-stock modal immediately after login
+- Vendor/Buyer management
+- Inventory module with dropdown pages:
+  - Raw Materials
+  - Parts
+  - Finished Products
+  - MRO
+- Products and Parts module:
+  - Separate tables for Finished Products and Parts
+  - Add Part modal with mandatory colour
+  - BOM can be created for both finished products and parts
+  - Finished product BOM can include both raw materials and parts
+- Production orders:
+  - Raw material release workflow
+  - Status lifecycle and stock movements
+- Purchase orders:
+  - Terms modal while creating PO (`payment_pdc_days`, delivery/freight/packaging/inspection/packing)
+  - Low-stock purchase planner with batch PO PDF generation per vendor
+  - `PO Pending Approvals` section (inventory + admin approvals)
+  - Admin-only delete for pending PO approvals
+  - Final PO list only after both approvals
+  - Receive/cancel/reopen flow for approved POs
+  - Excel + PDF export with company/vendor header layout and signatures from `assets/images/`
+
+## Tech Stack
 
 - Python 3.12
 - Django 5.1
-- SQLite (development)
+- SQLite (default local)
 - PostgreSQL (production)
-- Bootstrap 5 (responsive UI)
+- Bootstrap 5
 - openpyxl (Excel export)
 - reportlab (PDF export)
-- Gunicorn (WSGI server)
-- Nginx (reverse proxy + static files)
-
-## MVP Features Implemented
-
-- Login/logout with Django auth.
-- Role-based access with custom user roles:
-  - `admin`
-  - `inventory_manager`
-  - `production_manager`
-  - `viewer`
-- Admin user management:
-  - create users
-  - deactivate users
-  - delete users
-- Dashboard:
-  - raw material count
-  - finished product count
-  - vendor/buyer count
-  - production in progress
-  - low stock alerts
-  - recent inventory transactions
-- Vendor/Buyer management with GST and address validation.
-  - edit and delete actions from list view
-- Raw material management:
-  - mandatory supplier selection from existing vendors
-  - optional multiple supplier mapping per material
-  - material type tagging (e.g., Fabric, Mesh, Thread)
-  - edit and delete actions from list view
-  - units (`kg`, `m`, `pieces`, `litre`)
-  - opening stock and reorder level
-  - manual stock adjustment with ledger audit
-- Finished products and BOM mapping.
-- Production order workflow:
-  - create order for finished product + quantity
-  - automatic raw material deduction using BOM
-  - insufficient-stock blocking
-  - consumption + ledger entries
-- Purchase orders:
-  - multiple line items
-  - vendor-first creation flow (select vendor, then choose eligible materials)
-  - partial receive workflow per line item
-  - status lifecycle with rules (`open` -> `partially_received` -> `received`, plus `cancelled`/`reopen`)
-  - stock increment + inventory ledger entries on each receipt
-  - list filters/search by status, vendor, date range, PO/material text
-  - Excel and PDF export per PO
-- Responsive pages for desktop/mobile.
+- Gunicorn + Nginx (deployment)
 
 ## Project Layout
 
-- `backend/config/` - Django project config
-- `backend/accounts/` - auth + roles + user management
-- `backend/dashboard/` - dashboard page
+- `backend/config/` - Django settings and URLs
+- `backend/accounts/` - auth, roles, users, audit logs
+- `backend/dashboard/` - dashboard and low-stock modal trigger
 - `backend/partners/` - vendors/buyers
-- `backend/inventory/` - raw materials + inventory ledger
-- `backend/production/` - finished products, BOM, production orders
-- `backend/purchasing/` - purchase orders + exports
-- `backend/templates/` - HTML templates
-- `backend/static/` - CSS
+- `backend/inventory/` - raw materials, MRO, inventory pages/stock actions
+- `backend/production/` - products, parts, BOM, production orders
+- `backend/purchasing/` - PO workflows, approvals, exports
+- `backend/templates/` - server-rendered UI
+- `assets/images/` - PO signature images
+- `frontend/` - standalone React/Vite sandbox (optional)
 
-## Setup
+## Local Setup (Backend)
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
 cp backend/.env.example backend/.env
+
 cd backend
-python manage.py makemigrations
 python manage.py migrate
 python manage.py bootstrap_mvp
-python manage.py seed_demo_data --reset  # optional: refresh demo vendors/materials/PO statuses
+python manage.py seed_demo_data --reset   # optional demo data
 python manage.py runserver 127.0.0.1:8000
 ```
 
@@ -92,6 +75,30 @@ Default admin credentials:
 - username: `admin`
 - password: `admin123`
 
+## Local Setup (Shortcuts)
+
+A few helper targets are available:
+
+```bash
+make init
+make migrate
+make bootstrap
+make run
+make test
+```
+
+## Migrations and Schema Sync
+
+Always run migrations after pulling updates:
+
+```bash
+source .venv/bin/activate
+cd backend
+python manage.py migrate
+```
+
+If you hit errors like `table ... has no column named ...`, your DB schema is behind code; run `python manage.py migrate` and restart the server.
+
 ## Tests
 
 ```bash
@@ -100,19 +107,18 @@ cd backend
 python manage.py test
 ```
 
-## Settings Profiles
+## Environment Profiles
 
-- Settings entrypoint: `backend/config/settings.py`
-- Controlled by `DJANGO_ENV` in `backend/.env`
-- Values:
-  - `development` -> `config.settings_dev`
-  - `production` -> `config.settings_prod`
+Settings entrypoint: `backend/config/settings.py`
+
+- `DJANGO_ENV=development` -> `config.settings_dev`
+- `DJANGO_ENV=production` -> `config.settings_prod`
 
 Environment variables are loaded from `backend/.env` (or `DJANGO_DOTENV_PATH`).
 
-Minimum production environment values:
+Minimum production variables:
 
-```bash
+```env
 DJANGO_ENV=production
 DJANGO_SECRET_KEY=<strong-random-secret>
 DJANGO_ALLOWED_HOSTS=your-domain.com,www.your-domain.com
@@ -120,72 +126,6 @@ DJANGO_CSRF_TRUSTED_ORIGINS=https://your-domain.com,https://www.your-domain.com
 DATABASE_URL=postgresql://busta_user:<db-password>@127.0.0.1:5432/busta_im
 ```
 
-## Production Deployment (Ubuntu VM)
+## Deployment
 
-1. Clone code to `/opt/busta_im` and create venv:
-```bash
-cd /opt
-git clone <your-repo-url> busta_im
-cd busta_im
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r backend/requirements.txt
-```
-
-2. Prepare environment:
-```bash
-cp backend/.env.example backend/.env
-# edit backend/.env with production values
-```
-
-3. Setup PostgreSQL (example):
-```bash
-sudo -u postgres psql
-CREATE DATABASE busta_im;
-CREATE USER busta_user WITH PASSWORD '<strong-db-password>';
-GRANT ALL PRIVILEGES ON DATABASE busta_im TO busta_user;
-\q
-```
-
-4. Run migrations and collect static:
-```bash
-cd /opt/busta_im/backend
-/opt/busta_im/.venv/bin/python manage.py migrate
-/opt/busta_im/.venv/bin/python manage.py collectstatic --noinput
-```
-
-5. Configure systemd:
-```bash
-sudo cp /opt/busta_im/deploy/systemd/busta-im.service /etc/systemd/system/busta-im.service
-sudo systemctl daemon-reload
-sudo systemctl enable busta-im
-sudo systemctl start busta-im
-sudo systemctl status busta-im
-```
-
-6. Configure Nginx:
-```bash
-sudo cp /opt/busta_im/deploy/nginx/busta-im.conf /etc/nginx/sites-available/busta-im
-sudo ln -s /etc/nginx/sites-available/busta-im /etc/nginx/sites-enabled/busta-im
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-7. Enable HTTPS (Let's Encrypt):
-```bash
-sudo apt-get install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d your-domain.com -d www.your-domain.com
-```
-
-Deployment templates:
-- `deploy/systemd/busta-im.service`
-- `deploy/nginx/busta-im.conf`
-- `backend/.env.example`
-
-Oracle Cloud deployment guide:
-- `DEPLOYMENT_README.md` (see `## 10. Oracle Cloud Deployment (Step-by-Step + PostgreSQL)`)
-
-## Notes
-
-- Legacy non-framework implementation backup is kept at `backend_legacy_stdlib/`.
-- For production, use PostgreSQL and keep `DEBUG` disabled.
+Use `DEPLOYMENT_README.md` for complete VM + PostgreSQL + Nginx + Gunicorn instructions.

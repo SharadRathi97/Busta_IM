@@ -226,7 +226,7 @@ class RoleAccessConsistencyTests(TestCase):
         response = self.client.get(reverse("production:products"), follow=True)
 
         self.assertRedirects(response, reverse("dashboard:home"))
-        self.assertContains(response, "You do not have permission to access products and BOM.")
+        self.assertContains(response, "You do not have permission to access products and parts.")
 
     def test_production_manager_is_denied_purchase_order_pages(self):
         self.client.force_login(self.production_manager)
@@ -254,7 +254,7 @@ class RoleAccessConsistencyTests(TestCase):
         response = self.client.get(reverse("production:bom_csv_template"), follow=True)
 
         self.assertRedirects(response, reverse("dashboard:home"))
-        self.assertContains(response, "You do not have permission to access products and BOM.")
+        self.assertContains(response, "You do not have permission to access products and parts.")
 
 
 class UserDeletionTests(TestCase):

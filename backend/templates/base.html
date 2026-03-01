@@ -19,11 +19,35 @@
           <div class="collapse navbar-collapse" id="mainNav">
             <ul class="navbar-nav me-auto mb-2 mb-lg-0">
               {% for item in app_navigation %}
-                <li class="nav-item">
-                  <a class="nav-link{% if item.is_active %} active{% endif %}" href="{% url item.url_name %}">
-                    {{ item.label }}
-                  </a>
-                </li>
+                {% if item.type == "dropdown" %}
+                  <li class="nav-item dropdown">
+                    <a
+                      class="nav-link dropdown-toggle{% if item.is_active %} active{% endif %}"
+                      href="#"
+                      id="navDropdown{{ forloop.counter }}"
+                      role="button"
+                      data-bs-toggle="dropdown"
+                      aria-expanded="false"
+                    >
+                      {{ item.label }}
+                    </a>
+                    <ul class="dropdown-menu" aria-labelledby="navDropdown{{ forloop.counter }}">
+                      {% for child in item.children %}
+                        <li>
+                          <a class="dropdown-item{% if child.is_active %} active{% endif %}" href="{% url child.url_name %}">
+                            {{ child.label }}
+                          </a>
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  </li>
+                {% else %}
+                  <li class="nav-item">
+                    <a class="nav-link{% if item.is_active %} active{% endif %}" href="{% url item.url_name %}">
+                      {{ item.label }}
+                    </a>
+                  </li>
+                {% endif %}
               {% endfor %}
             </ul>
             <span class="badge rounded-pill text-bg-secondary me-2">{{ request.user.get_full_name|default:request.user.username }} ({{ request.user.get_role_display }})</span>

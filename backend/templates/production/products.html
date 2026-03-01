@@ -1,47 +1,29 @@
 {% extends 'base.html' %}
-{% block title %}Products & BOM | Busta IM{% endblock %}
+{% block title %}Products and Parts | Busta IM{% endblock %}
 {% block content %}
-<h1 class="h4 mb-3">Finished Products & BOM</h1>
+<h1 class="h4 mb-3">Products and Parts</h1>
 
 {% if can_manage %}
-<div class="row g-3 mb-3">
-  <div class="col-12 col-xl-4">
-    <div class="card card-soft">
-      <div class="card-body">
-        <h2 class="h5">Add Finished Product</h2>
-        <form method="post" class="vstack gap-2">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="add_product">
-          {% for field in product_form %}
-            <div>
-              <label class="form-label">{{ field.label }}</label>
-              {{ field }}
-              {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-            </div>
-          {% endfor %}
-          <button class="btn btn-primary" type="submit">Add Product</button>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-12 col-xl-8 d-flex align-items-start justify-content-xl-end">
-    <div class="d-flex gap-2">
-      <button class="btn btn-outline-primary" id="uploadBomCsvBtn" type="button" data-template-url="{% url 'production:bom_csv_template' %}" data-bs-toggle="modal" data-bs-target="#uploadBomCsvModal">
-        Upload CSV
-      </button>
-      <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#addBomModal">
-        Add BOM
-      </button>
-    </div>
-  </div>
+<div class="d-flex flex-wrap gap-2 mb-3">
+  <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#addFinishedProductModal">
+    Add Finished Product
+  </button>
+  <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#addPartModal">
+    Add Part
+  </button>
+  <button class="btn btn-outline-primary" id="uploadBomCsvBtn" type="button" data-template-url="{% url 'production:bom_csv_template' %}" data-bs-toggle="modal" data-bs-target="#uploadBomCsvModal">
+    Upload CSV
+  </button>
+  <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#addBomModal">
+    Add BOM
+  </button>
 </div>
 {% endif %}
 
-<div class="card card-soft">
+<div class="card card-soft mb-3">
   <div class="card-body">
     <h2 class="h5">Finished Products</h2>
-    <div class="table-meta mb-2">Click a product name to view BOM mappings.</div>
+    <div class="table-meta mb-2">Click an item name to view BOM mappings.</div>
     <div class="table-shell">
       <div class="table-responsive">
         <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
@@ -49,6 +31,7 @@
             <tr>
               <th>ID</th>
               <th>Name</th>
+              <th>Colour</th>
               <th>SKU</th>
               <th>BOM Items</th>
               {% if can_manage %}<th>Actions</th>{% endif %}
@@ -63,6 +46,7 @@
                     {{ p.name }}
                   </button>
                 </td>
+                <td>{{ p.colour|default:"-" }}</td>
                 <td>{{ p.sku }}</td>
                 <td><span class="badge badge-soft">{{ p.bom_items.all|length }}</span></td>
                 {% if can_manage %}
@@ -75,7 +59,53 @@
                 {% endif %}
               </tr>
             {% empty %}
-              <tr><td colspan="{% if can_manage %}5{% else %}4{% endif %}">No products found.</td></tr>
+              <tr><td colspan="{% if can_manage %}5{% else %}4{% endif %}">No finished products found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card card-soft">
+  <div class="card-body">
+    <h2 class="h5">Parts</h2>
+    <div class="table-meta mb-2">Click a part name to view BOM mappings.</div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>SKU</th>
+              <th>BOM Items</th>
+              {% if can_manage %}<th>Actions</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in parts %}
+              <tr>
+                <td>{{ p.id }}</td>
+                <td>
+                  <button class="btn btn-link btn-sm p-0 align-baseline text-start" type="button" data-bs-toggle="modal" data-bs-target="#bomModal{{ p.id }}">
+                    {{ p.name }}
+                  </button>
+                </td>
+                <td>{{ p.sku }}</td>
+                <td><span class="badge badge-soft">{{ p.bom_items.all|length }}</span></td>
+                {% if can_manage %}
+                  <td>
+                    <form method="post" action="{% url 'production:delete_product' p.id %}" onsubmit="return confirm('Delete this part? Its BOM mappings will also be removed.');">
+                      {% csrf_token %}
+                      <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                    </form>
+                  </td>
+                {% endif %}
+              </tr>
+            {% empty %}
+              <tr><td colspan="{% if can_manage %}6{% else %}5{% endif %}">No parts found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -85,6 +115,77 @@
 </div>
 
 {% if can_manage %}
+  <div class="modal fade" id="addFinishedProductModal" tabindex="-1" aria-labelledby="addFinishedProductModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0" id="addFinishedProductModalLabel">Add Finished Product</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form method="post">
+          <div class="modal-body vstack gap-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add_product">
+            {{ product_form.item_type }}
+            <div>
+              <label class="form-label">{{ product_form.name.label }}</label>
+              {{ product_form.name }}
+              {% for error in product_form.name.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            <div>
+              <label class="form-label">{{ product_form.sku.label }}</label>
+              {{ product_form.sku }}
+              {% for error in product_form.sku.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            {% for error in product_form.non_field_errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" type="submit">Add Finished Product</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="addPartModal" tabindex="-1" aria-labelledby="addPartModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0" id="addPartModalLabel">Add Part</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form method="post">
+          <div class="modal-body vstack gap-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add_part">
+            {{ part_form.item_type }}
+            <div>
+              <label class="form-label">{{ part_form.name.label }}</label>
+              {{ part_form.name }}
+              {% for error in part_form.name.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            <div>
+              <label class="form-label">{{ part_form.sku.label }}</label>
+              {{ part_form.sku }}
+              {% for error in part_form.sku.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            <div>
+              <label class="form-label">{{ part_form.colour.label }}</label>
+              {{ part_form.colour }}
+              {% for error in part_form.colour.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            {% for error in part_form.non_field_errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" type="submit">Add Part</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <div class="modal fade" id="uploadBomCsvModal" tabindex="-1" aria-labelledby="uploadBomCsvModalLabel" aria-hidden="true">
     <div class="modal-dialog">
       <div class="modal-content">
@@ -133,8 +234,8 @@
                 <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
                   <thead>
                     <tr>
-                      <th style="min-width: 260px;">Finished Product</th>
-                      <th style="min-width: 280px;">Raw Material</th>
+                      <th style="min-width: 280px;">Target (Finished Product / Part)</th>
+                      <th style="min-width: 320px;">Component (Raw Material / Part)</th>
                       <th style="min-width: 160px;">Qty / Unit</th>
                       <th style="width: 80px;">Row</th>
                     </tr>
@@ -143,7 +244,7 @@
                 </table>
               </div>
             </div>
-            <div class="form-help mt-2">Select a product first. Material options update for that product.</div>
+            <div class="form-help mt-2">For finished products, both raw materials and parts are available as BOM components.</div>
           </div>
           <div class="modal-footer justify-content-between">
             <button class="btn btn-sm btn-outline-primary" type="button" id="addBomRowBtn">Add Row</button>
@@ -158,14 +259,18 @@
   </div>
 {% endif %}
 
-{% for p in products %}
+{% for p in catalog_items %}
   <div class="modal fade" id="bomModal{{ p.id }}" tabindex="-1" aria-labelledby="bomModalLabel{{ p.id }}" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
       <div class="modal-content">
         <div class="modal-header">
           <div>
             <h2 class="modal-title h5 mb-0" id="bomModalLabel{{ p.id }}">BOM for {{ p.name }}</h2>
-            <div class="d-flex gap-2 mt-2">
+            <div class="small text-muted mb-2">
+              {{ p.get_item_type_display }} · SKU {{ p.sku }}
+              {% if p.item_type == 'part' and p.colour %} · Colour {{ p.colour }}{% endif %}
+            </div>
+            <div class="d-flex gap-2">
               <a class="btn btn-sm btn-outline-success" href="{% url 'production:export_bom_excel' p.id %}">Download Excel</a>
               <a class="btn btn-sm btn-outline-danger" href="{% url 'production:export_bom_pdf' p.id %}">Download PDF</a>
             </div>
@@ -179,7 +284,7 @@
                 <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
                   <thead>
                     <tr>
-                      <th>Raw Material</th>
+                      <th>Component</th>
                       <th>Qty / Unit</th>
                       <th>Actions</th>
                     </tr>
@@ -187,8 +292,13 @@
                   <tbody>
                     {% for item in p.bom_items.all %}
                       <tr>
-                        <td>{{ item.material.name }}</td>
-                        <td>{{ item.qty_per_unit }} {{ item.material.unit }}</td>
+                        <td>
+                          {{ item.component_name }}
+                          <div class="small text-muted">
+                            {% if item.material_id %}Raw Material{% else %}Part{% endif %} · {{ item.component_code }}
+                          </div>
+                        </td>
+                        <td>{{ item.qty_per_unit }} {{ item.component_unit }}</td>
                         <td>
                           {% if can_manage %}
                             <div class="row-actions">
@@ -206,12 +316,10 @@
                                 {% csrf_token %}
                                 <input type="hidden" name="product_id" value="{{ p.id }}">
                                 <div class="col-12">
-                                  <label class="form-label mb-1">Raw Material</label>
-                                  <select class="form-select form-select-sm" name="material" required>
-                                    {% for material in bom_material_choices %}
-                                      <option value="{{ material.id }}" {% if material.id == item.material_id %}selected{% endif %}>
-                                        {{ material.name }} ({{ material.code }})
-                                      </option>
+                                  <label class="form-label mb-1">Component</label>
+                                  <select class="form-select form-select-sm" name="component" required>
+                                    {% for value, label in item.edit_component_choices %}
+                                      <option value="{{ value }}" {% if value == item.component_key %}selected{% endif %}>{{ label }}</option>
                                     {% endfor %}
                                   </select>
                                 </div>
@@ -235,7 +343,7 @@
               </div>
             </div>
           {% else %}
-            <div class="text-muted">No BOM mappings defined for this product.</div>
+            <div class="text-muted">No BOM mappings defined for this item.</div>
           {% endif %}
         </div>
         <div class="modal-footer">
@@ -272,21 +380,21 @@
     </script>
 
     {{ product_choices|json_script:"bomProductChoicesData" }}
-    {{ product_material_map|json_script:"bomProductMaterialMapData" }}
+    {{ product_component_map|json_script:"bomProductComponentMapData" }}
     {{ bom_bulk_rows|json_script:"bomBulkRowsSeedData" }}
     <script>
       (() => {
         const rowsBody = document.getElementById("bomBulkRows");
         const addRowBtn = document.getElementById("addBomRowBtn");
         const productChoicesNode = document.getElementById("bomProductChoicesData");
-        const materialMapNode = document.getElementById("bomProductMaterialMapData");
+        const componentMapNode = document.getElementById("bomProductComponentMapData");
         const seedRowsNode = document.getElementById("bomBulkRowsSeedData");
-        if (!rowsBody || !addRowBtn || !productChoicesNode || !materialMapNode || !seedRowsNode) {
+        if (!rowsBody || !addRowBtn || !productChoicesNode || !componentMapNode || !seedRowsNode) {
           return;
         }
 
         const productChoices = JSON.parse(productChoicesNode.textContent || "[]");
-        const productMaterialMap = JSON.parse(materialMapNode.textContent || "{}");
+        const productComponentMap = JSON.parse(componentMapNode.textContent || "{}");
         const seedRows = JSON.parse(seedRowsNode.textContent || "[]");
 
         const makeOption = (value, label, selected) => {
@@ -297,27 +405,27 @@
           return option;
         };
 
-        const setMaterialOptions = (selectEl, productId, selectedMaterialId) => {
+        const setComponentOptions = (selectEl, productId, selectedComponent) => {
           selectEl.replaceChildren();
-          const selectedId = String(selectedMaterialId || "");
+          const selectedValue = String(selectedComponent || "");
           if (!productId) {
             selectEl.disabled = true;
-            selectEl.appendChild(makeOption("", "Select product first", true));
+            selectEl.appendChild(makeOption("", "Select target first", true));
             return;
           }
 
-          const options = productMaterialMap[String(productId)] || [];
+          const options = productComponentMap[String(productId)] || [];
           if (!options.length) {
             selectEl.disabled = true;
-            selectEl.appendChild(makeOption("", "No available materials", true));
+            selectEl.appendChild(makeOption("", "No available components", true));
             return;
           }
 
           selectEl.disabled = false;
-          selectEl.appendChild(makeOption("", "Select material", selectedId === ""));
+          selectEl.appendChild(makeOption("", "Select component", selectedValue === ""));
           options.forEach((optionItem) => {
-            const optionValue = String(optionItem.id);
-            selectEl.appendChild(makeOption(optionValue, optionItem.label, optionValue === selectedId));
+            const optionValue = String(optionItem.value);
+            selectEl.appendChild(makeOption(optionValue, optionItem.label, optionValue === selectedValue));
           });
         };
 
@@ -325,7 +433,7 @@
           const row = document.createElement("tr");
 
           const productCell = document.createElement("td");
-          const materialCell = document.createElement("td");
+          const componentCell = document.createElement("td");
           const qtyCell = document.createElement("td");
           const removeCell = document.createElement("td");
 
@@ -333,16 +441,16 @@
           productSelect.name = "bom_product";
           productSelect.className = "form-select form-select-sm";
           productSelect.required = true;
-          productSelect.appendChild(makeOption("", "Select product", !rowData.product));
+          productSelect.appendChild(makeOption("", "Select target", !rowData.product));
           productChoices.forEach((optionItem) => {
             const optionValue = String(optionItem.id);
             productSelect.appendChild(makeOption(optionValue, optionItem.label, optionValue === String(rowData.product || "")));
           });
 
-          const materialSelect = document.createElement("select");
-          materialSelect.name = "bom_material";
-          materialSelect.className = "form-select form-select-sm";
-          materialSelect.required = true;
+          const componentSelect = document.createElement("select");
+          componentSelect.name = "bom_component";
+          componentSelect.className = "form-select form-select-sm";
+          componentSelect.required = true;
 
           const qtyInput = document.createElement("input");
           qtyInput.name = "bom_qty";
@@ -360,18 +468,18 @@
           removeBtn.setAttribute("data-remove-row", "1");
 
           productSelect.addEventListener("change", () => {
-            setMaterialOptions(materialSelect, productSelect.value, "");
+            setComponentOptions(componentSelect, productSelect.value, "");
           });
 
-          setMaterialOptions(materialSelect, productSelect.value, rowData.material || "");
+          setComponentOptions(componentSelect, productSelect.value, rowData.component || "");
 
           productCell.appendChild(productSelect);
-          materialCell.appendChild(materialSelect);
+          componentCell.appendChild(componentSelect);
           qtyCell.appendChild(qtyInput);
           removeCell.appendChild(removeBtn);
 
           row.appendChild(productCell);
-          row.appendChild(materialCell);
+          row.appendChild(componentCell);
           row.appendChild(qtyCell);
           row.appendChild(removeCell);
           rowsBody.appendChild(row);
@@ -434,6 +542,32 @@
     <script>
       (() => {
         const modalEl = document.getElementById("uploadBomCsvModal");
+        if (!modalEl) {
+          return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
+
+  {% if show_add_product_modal and can_manage %}
+    <script>
+      (() => {
+        const modalEl = document.getElementById("addFinishedProductModal");
+        if (!modalEl) {
+          return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
+
+  {% if show_add_part_modal and can_manage %}
+    <script>
+      (() => {
+        const modalEl = document.getElementById("addPartModal");
         if (!modalEl) {
           return;
         }

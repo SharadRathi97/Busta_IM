@@ -22,7 +22,7 @@ def _line_cost(qty_per_unit: Decimal, cost_per_unit: Decimal) -> Decimal:
 
 
 def bom_to_excel(product: FinishedProduct) -> bytes:
-    items = list(product.bom_items.select_related("material").all())
+    items = list(product.bom_items.select_related("material", "part").all())
     wb = Workbook()
     ws = wb.active
     ws.title = "BOM"
@@ -35,23 +35,23 @@ def bom_to_excel(product: FinishedProduct) -> bytes:
     ws["B4"] = product.sku
 
     ws.append([])
-    ws.append(["S.No", "Raw Material", "Code", "Qty / Unit", "Unit", "Cost / Unit", "Line Cost"])
+    ws.append(["S.No", "Component", "Code", "Qty / Unit", "Unit", "Cost / Unit", "Line Cost"])
     header_row = ws.max_row
     for cell in ws[header_row]:
         cell.font = Font(bold=True)
 
     total_cost = Decimal("0.000")
     for index, item in enumerate(items, start=1):
-        line_cost = _line_cost(item.qty_per_unit, item.material.cost_per_unit)
+        line_cost = _line_cost(item.qty_per_unit, item.component_cost_per_unit)
         total_cost += line_cost
         ws.append(
             [
                 index,
-                item.material.name,
-                item.material.code,
+                item.component_name,
+                item.component_code,
                 float(item.qty_per_unit),
-                item.material.unit,
-                float(item.material.cost_per_unit),
+                item.component_unit,
+                float(item.component_cost_per_unit),
                 float(line_cost),
             ]
         )
@@ -75,7 +75,7 @@ def bom_to_excel(product: FinishedProduct) -> bytes:
 
 
 def bom_to_pdf(product: FinishedProduct) -> bytes:
-    items = list(product.bom_items.select_related("material").all())
+    items = list(product.bom_items.select_related("material", "part").all())
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -92,19 +92,19 @@ def bom_to_pdf(product: FinishedProduct) -> bytes:
     elements.append(Paragraph(f"SKU: {product.sku}", styles["Normal"]))
     elements.append(Spacer(1, 10))
 
-    data = [["S.No", "Raw Material", "Code", "Qty / Unit", "Unit", "Cost / Unit", "Line Cost"]]
+    data = [["S.No", "Component", "Code", "Qty / Unit", "Unit", "Cost / Unit", "Line Cost"]]
     total_cost = Decimal("0.000")
     for index, item in enumerate(items, start=1):
-        line_cost = _line_cost(item.qty_per_unit, item.material.cost_per_unit)
+        line_cost = _line_cost(item.qty_per_unit, item.component_cost_per_unit)
         total_cost += line_cost
         data.append(
             [
                 str(index),
-                item.material.name,
-                item.material.code,
+                item.component_name,
+                item.component_code,
                 str(item.qty_per_unit),
-                item.material.unit,
-                str(item.material.cost_per_unit),
+                item.component_unit,
+                str(item.component_cost_per_unit),
                 str(line_cost),
             ]
         )

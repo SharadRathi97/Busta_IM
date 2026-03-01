@@ -21,7 +21,15 @@ from accounts.permissions import PRODUCTION_MANAGE_ROLES, PRODUCTION_VIEW_ROLES,
 from inventory.models import RawMaterial
 
 from .exports import bom_to_excel, bom_to_pdf
-from .forms import BOMCSVUploadForm, BOMItemForm, BOMItemUpdateForm, FinishedProductForm, ProductionOrderCreateForm, ProductionStatusForm
+from .forms import (
+    BOMCSVUploadForm,
+    BOMItemForm,
+    BOMItemUpdateForm,
+    FinishedProductForm,
+    ProductionOrderCreateForm,
+    ProductionStatusForm,
+    build_bom_component_choices,
+)
 from .models import (
     BOMItem,
     FinishedProduct,
@@ -66,7 +74,7 @@ def _import_bom_from_rows(rows: list[dict[str, str]]):
 
     errors: list[str] = []
     pending_items: list[BOMItem] = []
-    seen_pairs: set[tuple[int, int]] = set()
+    seen_pairs: set[tuple[int, str]] = set()
 
     for row_number, row in enumerate(rows, start=2):
         product_sku = row.get("product_sku", "").upper()
@@ -85,7 +93,7 @@ def _import_bom_from_rows(rows: list[dict[str, str]]):
         row_form = BOMItemForm(
             data={
                 "product": product.id,
-                "material": material.id,
+                "component": f"raw:{material.id}",
                 "qty_per_unit": row.get("qty_per_unit", ""),
             }
         )
@@ -99,7 +107,7 @@ def _import_bom_from_rows(rows: list[dict[str, str]]):
             errors.append(f"Row {row_number}: {'; '.join(row_errors)}")
             continue
 
-        pair = (product.id, material.id)
+        pair = (product.id, f"raw:{material.id}")
         if pair in seen_pairs:
             errors.append(f"Row {row_number}: duplicate product/material pair in this CSV.")
             continue
@@ -113,6 +121,7 @@ def _import_bom_from_rows(rows: list[dict[str, str]]):
             BOMItem(
                 product=product,
                 material=material,
+                part=None,
                 qty_per_unit=row_form.cleaned_data["qty_per_unit"],
             )
         )
@@ -127,21 +136,21 @@ def _import_bom_from_rows(rows: list[dict[str, str]]):
 
 def _extract_bom_bulk_rows(post_data):
     product_values = post_data.getlist("bom_product")
-    material_values = post_data.getlist("bom_material")
+    component_values = post_data.getlist("bom_component")
     qty_values = post_data.getlist("bom_qty")
 
-    row_count = max(len(product_values), len(material_values), len(qty_values))
+    row_count = max(len(product_values), len(component_values), len(qty_values))
     rows: list[dict[str, str]] = []
     for index in range(row_count):
         product_value = (product_values[index] if index < len(product_values) else "").strip()
-        material_value = (material_values[index] if index < len(material_values) else "").strip()
+        component_value = (component_values[index] if index < len(component_values) else "").strip()
         qty_value = (qty_values[index] if index < len(qty_values) else "").strip()
-        if not product_value and not material_value and not qty_value:
+        if not product_value and not component_value and not qty_value:
             continue
         rows.append(
             {
                 "product": product_value,
-                "material": material_value,
+                "component": component_value,
                 "qty_per_unit": qty_value,
             }
         )
@@ -188,7 +197,7 @@ def _deny_production_view(request, *, area: str):
 @login_required
 @require_http_methods(["GET"])
 def bom_csv_template(request):
-    denied = _deny_production_view(request, area="products and BOM")
+    denied = _deny_production_view(request, area="products and parts")
     if denied:
         return denied
 
@@ -204,37 +213,65 @@ def bom_csv_template(request):
 @login_required
 @require_http_methods(["GET", "POST"])
 def product_bom_page(request):
-    denied = _deny_production_view(request, area="products and BOM")
+    denied = _deny_production_view(request, area="products and parts")
     if denied:
         return denied
 
     can_manage = request.user.role in PRODUCTION_MANAGE_ROLES
     action = request.POST.get("action") if request.method == "POST" else None
-    product_form = FinishedProductForm(request.POST if action == "add_product" else None, prefix="prod")
+    product_form = FinishedProductForm(
+        request.POST if action == "add_product" else None,
+        prefix="prod",
+        initial={"item_type": FinishedProduct.ItemType.FINISHED},
+    )
+    part_form = FinishedProductForm(
+        request.POST if action == "add_part" else None,
+        prefix="part",
+        initial={"item_type": FinishedProduct.ItemType.PART},
+    )
     bom_form = BOMItemForm(request.POST if action == "add_bom" else None, prefix="bom")
-    csv_form = BOMCSVUploadForm(request.POST if action == "upload_bom_csv" else None, request.FILES if action == "upload_bom_csv" else None)
+    csv_form = BOMCSVUploadForm(
+        request.POST if action == "upload_bom_csv" else None,
+        request.FILES if action == "upload_bom_csv" else None,
+    )
     show_add_bom_modal = False
     show_upload_csv_modal = False
-    bom_bulk_rows = [{"product": "", "material": "", "qty_per_unit": ""}]
+    show_add_product_modal = False
+    show_add_part_modal = False
+    bom_bulk_rows = [{"product": "", "component": "", "qty_per_unit": ""}]
 
     if request.method == "POST":
         denied = require_roles(
             request,
             PRODUCTION_MANAGE_ROLES,
             redirect_to="production:products",
-            area="products and BOM",
+            area="products and parts",
         )
         if denied:
             return denied
 
-        if action == "add_product" and product_form.is_valid():
-            product_form.save()
-            messages.success(request, "Finished product added.")
-            return redirect("production:products")
+        if action == "add_product":
+            if product_form.is_valid():
+                product_form.save()
+                messages.success(request, "Finished product added.")
+                return redirect("production:products")
+            show_add_product_modal = True
+
+        if action == "add_part":
+            if part_form.is_valid():
+                part_form.save()
+                messages.success(request, "Part added.")
+                return redirect("production:products")
+            show_add_part_modal = True
 
         if action == "add_bom" and bom_form.is_valid():
             try:
-                bom_form.save()
+                BOMItem.objects.create(
+                    product=bom_form.cleaned_data["product"],
+                    material=bom_form.cleaned_data["material"],
+                    part=bom_form.cleaned_data["part"],
+                    qty_per_unit=bom_form.cleaned_data["qty_per_unit"],
+                )
                 messages.success(request, "BOM item added.")
                 return _redirect_products(bom_form.cleaned_data["product"].id)
             except IntegrityError:
@@ -248,10 +285,10 @@ def product_bom_page(request):
             else:
                 items_to_create: list[BOMItem] = []
                 row_errors: list[str] = []
-                seen_pairs: set[tuple[int, int]] = set()
+                seen_pairs: set[tuple[int, str]] = set()
                 field_labels = {
                     "product": "product",
-                    "material": "material",
+                    "component": "component",
                     "qty_per_unit": "quantity",
                 }
 
@@ -270,21 +307,35 @@ def product_bom_page(request):
 
                     product = row_form.cleaned_data["product"]
                     material = row_form.cleaned_data["material"]
+                    part = row_form.cleaned_data["part"]
                     qty_per_unit = row_form.cleaned_data["qty_per_unit"]
-                    pair = (product.id, material.id)
+                    component_key = f"raw:{material.id}" if material else f"part:{part.id}"
+                    pair = (product.id, component_key)
 
                     if pair in seen_pairs:
-                        row_errors.append(f"Row {row_index}: duplicate product/material pair in this submission.")
+                        row_errors.append(f"Row {row_index}: duplicate target/component pair in this submission.")
                         continue
                     seen_pairs.add(pair)
 
-                    if BOMItem.objects.filter(product_id=product.id, material_id=material.id).exists():
+                    if material and BOMItem.objects.filter(product_id=product.id, material_id=material.id).exists():
                         row_errors.append(
                             f"Row {row_index}: mapping already exists for {product.name} and {material.name}."
                         )
                         continue
+                    if part and BOMItem.objects.filter(product_id=product.id, part_id=part.id).exists():
+                        row_errors.append(
+                            f"Row {row_index}: mapping already exists for {product.name} and {part.name}."
+                        )
+                        continue
 
-                    items_to_create.append(BOMItem(product=product, material=material, qty_per_unit=qty_per_unit))
+                    items_to_create.append(
+                        BOMItem(
+                            product=product,
+                            material=material,
+                            part=part,
+                            qty_per_unit=qty_per_unit,
+                        )
+                    )
 
                 if row_errors:
                     for row_error in row_errors[:8]:
@@ -323,30 +374,52 @@ def product_bom_page(request):
 
     open_bom_raw = (request.GET.get("open_bom") or "").strip()
     open_bom_id = int(open_bom_raw) if open_bom_raw.isdigit() else None
-    products = list(FinishedProduct.objects.prefetch_related("bom_items__material").order_by("name"))
-    materials = list(RawMaterial.objects.order_by("name"))
-    product_choices = [{"id": product.id, "label": f"{product.name} ({product.sku})"} for product in products]
-    product_material_map: dict[str, list[dict[str, int | str]]] = {}
-    for product in products:
-        mapped_material_ids = {item.material_id for item in product.bom_items.all()}
-        product_material_map[str(product.id)] = [
-            {"id": material.id, "label": f"{material.name} ({material.code})"}
-            for material in materials
-            if material.id not in mapped_material_ids
+    catalog_items = list(
+        FinishedProduct.objects.prefetch_related("bom_items__material", "bom_items__part").order_by("item_type", "name")
+    )
+    finished_products = [item for item in catalog_items if item.item_type == FinishedProduct.ItemType.FINISHED]
+    parts = [item for item in catalog_items if item.item_type == FinishedProduct.ItemType.PART]
+    product_choices = [
+        {
+            "id": product.id,
+            "label": (
+                f"{product.name} ({product.sku})"
+                if product.item_type == FinishedProduct.ItemType.FINISHED
+                else f"{product.name}{f' [{product.colour}]' if product.colour else ''} ({product.sku}) [Part]"
+            ),
+        }
+        for product in catalog_items
+    ]
+    product_component_map: dict[str, list[dict[str, str]]] = {}
+    for product in catalog_items:
+        component_choices = build_bom_component_choices(target_product=product)
+        product.available_bom_components = component_choices
+        product_component_map[str(product.id)] = [
+            {"value": value, "label": label}
+            for value, label in component_choices
         ]
+        for bom_item in product.bom_items.all():
+            bom_item.edit_component_choices = build_bom_component_choices(
+                target_product=product,
+                exclude_bom_item_id=bom_item.id,
+            )
 
     context = {
         "can_manage": can_manage,
         "product_form": product_form,
+        "part_form": part_form,
         "bom_form": bom_form,
         "csv_form": csv_form,
-        "products": products,
-        "bom_material_choices": materials,
+        "products": finished_products,
+        "parts": parts,
+        "catalog_items": catalog_items,
         "product_choices": product_choices,
-        "product_material_map": product_material_map,
+        "product_component_map": product_component_map,
         "open_bom_id": open_bom_id,
         "show_add_bom_modal": show_add_bom_modal,
         "show_upload_csv_modal": show_upload_csv_modal,
+        "show_add_product_modal": show_add_product_modal,
+        "show_add_part_modal": show_add_part_modal,
         "bom_bulk_rows": bom_bulk_rows,
     }
     return render(request, "production/products.html", context)
@@ -359,7 +432,7 @@ def update_bom_item(request, bom_id: int):
         request,
         PRODUCTION_MANAGE_ROLES,
         redirect_to="production:products",
-        area="products and BOM",
+        area="products and parts",
     )
     if denied:
         return denied
@@ -369,7 +442,10 @@ def update_bom_item(request, bom_id: int):
     form = BOMItemUpdateForm(request.POST, instance=bom_item)
     if form.is_valid():
         try:
-            form.save()
+            bom_item.material = form.cleaned_data["material"]
+            bom_item.part = form.cleaned_data["part"]
+            bom_item.qty_per_unit = form.cleaned_data["qty_per_unit"]
+            bom_item.save(update_fields=["material", "part", "qty_per_unit"])
             messages.success(request, "BOM item updated.")
         except IntegrityError:
             messages.error(request, "This BOM mapping already exists for the selected product.")
@@ -385,7 +461,7 @@ def delete_bom_item(request, bom_id: int):
         request,
         PRODUCTION_MANAGE_ROLES,
         redirect_to="production:products",
-        area="products and BOM",
+        area="products and parts",
     )
     if denied:
         return denied
@@ -404,13 +480,14 @@ def delete_finished_product(request, product_id: int):
         request,
         PRODUCTION_MANAGE_ROLES,
         redirect_to="production:products",
-        area="products and BOM",
+        area="products and parts",
     )
     if denied:
         return denied
 
-    product = get_object_or_404(FinishedProduct.objects.only("id", "name", "sku"), pk=product_id)
+    product = get_object_or_404(FinishedProduct.objects.only("id", "name", "sku", "item_type"), pk=product_id)
     product_label = f"{product.name} ({product.sku})"
+    item_label = "Part" if product.item_type == FinishedProduct.ItemType.PART else "Finished product"
     allowed_terminal_statuses = [
         ProductionOrder.Status.CANCELLED,
         ProductionOrder.Status.COMPLETED,
@@ -422,8 +499,8 @@ def delete_finished_product(request, product_id: int):
             if blocking_orders.exists():
                 messages.error(
                     request,
-                    "Finished product cannot be deleted while it has active production orders. "
-                    "Only products with cancelled/completed orders can be deleted.",
+                    f"{item_label} cannot be deleted while it has active production orders. "
+                    "Only items with cancelled/completed orders can be deleted.",
                 )
                 return redirect("production:products")
 
@@ -435,16 +512,16 @@ def delete_finished_product(request, product_id: int):
         if deletable_order_count:
             messages.success(
                 request,
-                f"Finished product {product_label} deleted. Removed {deletable_order_count} cancelled/completed production order(s).",
+                f"{item_label} {product_label} deleted. Removed {deletable_order_count} cancelled/completed production order(s).",
             )
         else:
-            messages.success(request, f"Finished product {product_label} deleted.")
+            messages.success(request, f"{item_label} {product_label} deleted.")
     except ProtectedError as exc:
         protected_labels = sorted({obj._meta.verbose_name for obj in exc.protected_objects})
         linked_text = f" Linked records: {', '.join(protected_labels)}." if protected_labels else ""
         messages.error(
             request,
-            f"Finished product cannot be deleted because it is linked to existing records.{linked_text}",
+            f"{item_label} cannot be deleted because it is linked to existing records.{linked_text}",
         )
     return redirect("production:products")
 
@@ -452,7 +529,7 @@ def delete_finished_product(request, product_id: int):
 @login_required
 @require_http_methods(["GET"])
 def export_product_bom_excel(request, product_id: int):
-    denied = _deny_production_view(request, area="products and BOM")
+    denied = _deny_production_view(request, area="products and parts")
     if denied:
         return denied
 
@@ -469,7 +546,7 @@ def export_product_bom_excel(request, product_id: int):
 @login_required
 @require_http_methods(["GET"])
 def export_product_bom_pdf(request, product_id: int):
-    denied = _deny_production_view(request, area="products and BOM")
+    denied = _deny_production_view(request, area="products and parts")
     if denied:
         return denied
 

@@ -261,6 +261,12 @@ class ProductBOMActionTests(TestCase):
         )
         self.product = FinishedProduct.objects.create(name="Laptop Sleeve", sku="FP-SLEEVE")
         self.product_two = FinishedProduct.objects.create(name="Gym Duffel", sku="FP-DUFFEL")
+        self.part = FinishedProduct.objects.create(
+            name="Handle Strap",
+            sku="PT-HANDLE",
+            item_type=FinishedProduct.ItemType.PART,
+            colour="Black",
+        )
         self.bom_item = BOMItem.objects.create(
             product=self.product,
             material=self.material_a,
@@ -273,7 +279,7 @@ class ProductBOMActionTests(TestCase):
         response = self.client.post(
             reverse("production:update_bom", args=[self.bom_item.id]),
             {
-                "material": self.material_b.id,
+                "component": f"raw:{self.material_b.id}",
                 "qty_per_unit": "0.750",
             },
         )
@@ -352,7 +358,7 @@ class ProductBOMActionTests(TestCase):
             {
                 "action": "add_bom_bulk",
                 "bom_product": [str(self.product.id), str(self.product_two.id)],
-                "bom_material": [str(self.material_b.id), str(self.material_c.id)],
+                "bom_component": [f"raw:{self.material_b.id}", f"raw:{self.material_c.id}"],
                 "bom_qty": ["0.750", "1.250"],
             },
         )
@@ -369,7 +375,7 @@ class ProductBOMActionTests(TestCase):
             {
                 "action": "add_bom_bulk",
                 "bom_product": [str(self.product.id)],
-                "bom_material": [str(self.material_a.id)],
+                "bom_component": [f"raw:{self.material_a.id}"],
                 "bom_qty": ["0.700"],
             },
         )
@@ -378,20 +384,71 @@ class ProductBOMActionTests(TestCase):
         self.assertContains(response, "already exists")
         self.assertEqual(BOMItem.objects.count(), 1)
 
-    def test_products_page_context_filters_material_options_per_product(self):
+    def test_products_page_context_filters_component_options_per_product(self):
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("production:products"))
         self.assertEqual(response.status_code, 200)
 
-        product_material_map = response.context["product_material_map"]
-        first_product_material_ids = {item["id"] for item in product_material_map[str(self.product.id)]}
-        second_product_material_ids = {item["id"] for item in product_material_map[str(self.product_two.id)]}
+        product_component_map = response.context["product_component_map"]
+        first_product_components = {item["value"] for item in product_component_map[str(self.product.id)]}
+        second_product_components = {item["value"] for item in product_component_map[str(self.product_two.id)]}
 
-        self.assertNotIn(self.material_a.id, first_product_material_ids)
-        self.assertIn(self.material_b.id, first_product_material_ids)
-        self.assertIn(self.material_c.id, first_product_material_ids)
-        self.assertIn(self.material_a.id, second_product_material_ids)
+        self.assertNotIn(f"raw:{self.material_a.id}", first_product_components)
+        self.assertIn(f"raw:{self.material_b.id}", first_product_components)
+        self.assertIn(f"raw:{self.material_c.id}", first_product_components)
+        self.assertIn(f"raw:{self.material_a.id}", second_product_components)
+        self.assertIn(f"part:{self.part.id}", first_product_components)
+
+    def test_bulk_add_bom_allows_part_component_for_finished_product(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("production:products"),
+            {
+                "action": "add_bom_bulk",
+                "bom_product": [str(self.product.id)],
+                "bom_component": [f"part:{self.part.id}"],
+                "bom_qty": ["1.000"],
+            },
+        )
+        self.assertRedirects(response, f"{reverse('production:products')}?open_bom={self.product.id}")
+        self.assertTrue(BOMItem.objects.filter(product=self.product, part=self.part).exists())
+
+    def test_add_part_requires_colour(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("production:products"),
+            {
+                "action": "add_part",
+                "part-name": "Shoulder Pad",
+                "part-sku": "PT-PAD",
+                "part-item_type": FinishedProduct.ItemType.PART,
+                "part-colour": "",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Colour is required for parts.")
+        self.assertFalse(FinishedProduct.objects.filter(sku="PT-PAD").exists())
+
+    def test_add_part_with_colour_creates_part(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("production:products"),
+            {
+                "action": "add_part",
+                "part-name": "Shoulder Pad",
+                "part-sku": "PT-PAD",
+                "part-item_type": FinishedProduct.ItemType.PART,
+                "part-colour": "Navy",
+            },
+        )
+
+        self.assertRedirects(response, reverse("production:products"))
+        created = FinishedProduct.objects.get(sku="PT-PAD")
+        self.assertEqual(created.item_type, FinishedProduct.ItemType.PART)
+        self.assertEqual(created.colour, "Navy")
 
     def test_export_product_bom_excel(self):
         self.client.force_login(self.user)

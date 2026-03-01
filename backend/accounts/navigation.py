@@ -10,52 +10,79 @@ from .permissions import (
 
 
 @dataclass(frozen=True)
-class NavigationItem:
+class NavigationLink:
     label: str
     url_name: str
     active_view_prefixes: tuple[str, ...]
     allowed_roles: frozenset[str]
 
 
-NAV_ITEMS: tuple[NavigationItem, ...] = (
-    NavigationItem(
+@dataclass(frozen=True)
+class NavigationDropdown:
+    label: str
+    allowed_roles: frozenset[str]
+    children: tuple[NavigationLink, ...]
+
+
+NAV_ITEMS: tuple[NavigationLink | NavigationDropdown, ...] = (
+    NavigationLink(
         label="Dashboard",
         url_name="dashboard:home",
         active_view_prefixes=("dashboard:",),
         allowed_roles=frozenset(role for role, _label in User.Role.choices),
     ),
-    NavigationItem(
+    NavigationLink(
         label="Vendors",
         url_name="partners:list",
         active_view_prefixes=("partners:",),
         allowed_roles=INVENTORY_VIEW_ROLES,
     ),
-    NavigationItem(
-        label="Raw Materials",
-        url_name="inventory:list",
-        active_view_prefixes=(
-            "inventory:list",
-            "inventory:csv_template",
-            "inventory:edit",
-            "inventory:delete",
-            "inventory:adjust",
+    NavigationDropdown(
+        label="Inventory",
+        allowed_roles=INVENTORY_VIEW_ROLES,
+        children=(
+            NavigationLink(
+                label="Raw Materials",
+                url_name="inventory:list",
+                active_view_prefixes=(
+                    "inventory:list",
+                    "inventory:csv_template",
+                    "inventory:edit",
+                    "inventory:delete",
+                    "inventory:adjust",
+                    "inventory:release_production_request",
+                    "inventory:reject_production_request",
+                ),
+                allowed_roles=INVENTORY_VIEW_ROLES,
+            ),
+            NavigationLink(
+                label="Parts",
+                url_name="inventory:parts_list",
+                active_view_prefixes=("inventory:parts_list",),
+                allowed_roles=INVENTORY_VIEW_ROLES,
+            ),
+            NavigationLink(
+                label="Finished Products",
+                url_name="inventory:finished_products_list",
+                active_view_prefixes=("inventory:finished_products_list",),
+                allowed_roles=INVENTORY_VIEW_ROLES,
+            ),
+            NavigationLink(
+                label="MRO",
+                url_name="inventory:mro_list",
+                active_view_prefixes=("inventory:mro_",),
+                allowed_roles=INVENTORY_VIEW_ROLES,
+            ),
         ),
-        allowed_roles=INVENTORY_VIEW_ROLES,
     ),
-    NavigationItem(
-        label="MRO Inventory",
-        url_name="inventory:mro_list",
-        active_view_prefixes=("inventory:mro_",),
-        allowed_roles=INVENTORY_VIEW_ROLES,
-    ),
-    NavigationItem(
+    NavigationLink(
         label="Purchase Orders",
         url_name="purchasing:list",
         active_view_prefixes=("purchasing:",),
         allowed_roles=INVENTORY_VIEW_ROLES,
     ),
-    NavigationItem(
-        label="Products & BOM",
+    NavigationLink(
+        label="Products and Parts",
         url_name="production:products",
         active_view_prefixes=(
             "production:products",
@@ -67,7 +94,7 @@ NAV_ITEMS: tuple[NavigationItem, ...] = (
         ),
         allowed_roles=PRODUCTION_VIEW_ROLES,
     ),
-    NavigationItem(
+    NavigationLink(
         label="Production Orders",
         url_name="production:orders",
         active_view_prefixes=(
@@ -77,7 +104,7 @@ NAV_ITEMS: tuple[NavigationItem, ...] = (
         ),
         allowed_roles=PRODUCTION_VIEW_ROLES,
     ),
-    NavigationItem(
+    NavigationLink(
         label="Users",
         url_name="accounts:user_list",
         active_view_prefixes=(
@@ -91,17 +118,53 @@ NAV_ITEMS: tuple[NavigationItem, ...] = (
 )
 
 
-def build_navigation_items(*, role: str, view_name: str | None) -> list[dict[str, str | bool]]:
+def _is_active(*, view_name: str, prefixes: tuple[str, ...]) -> bool:
+    return any(view_name.startswith(prefix) for prefix in prefixes)
+
+
+def build_navigation_items(*, role: str, view_name: str | None) -> list[dict[str, object]]:
     current_view_name = view_name or ""
-    items: list[dict[str, str | bool]] = []
+    items: list[dict[str, object]] = []
+
     for item in NAV_ITEMS:
         if role not in item.allowed_roles:
             continue
-        items.append(
-            {
-                "label": item.label,
-                "url_name": item.url_name,
-                "is_active": any(current_view_name.startswith(prefix) for prefix in item.active_view_prefixes),
-            }
-        )
+
+        if isinstance(item, NavigationLink):
+            items.append(
+                {
+                    "type": "link",
+                    "label": item.label,
+                    "url_name": item.url_name,
+                    "is_active": _is_active(view_name=current_view_name, prefixes=item.active_view_prefixes),
+                }
+            )
+            continue
+
+        children: list[dict[str, object]] = []
+        is_active = False
+        for child in item.children:
+            if role not in child.allowed_roles:
+                continue
+            child_active = _is_active(view_name=current_view_name, prefixes=child.active_view_prefixes)
+            if child_active:
+                is_active = True
+            children.append(
+                {
+                    "label": child.label,
+                    "url_name": child.url_name,
+                    "is_active": child_active,
+                }
+            )
+
+        if children:
+            items.append(
+                {
+                    "type": "dropdown",
+                    "label": item.label,
+                    "children": children,
+                    "is_active": is_active,
+                }
+            )
+
     return items

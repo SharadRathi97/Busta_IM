@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from io import StringIO
+from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -18,6 +19,7 @@ from django.views.decorators.http import require_http_methods
 from accounts.permissions import INVENTORY_MANAGE_ROLES, INVENTORY_VIEW_ROLES, require_roles
 from partners.models import Partner
 from production.models import (
+    FinishedProduct,
     ProductionOrder,
     reject_raw_materials_for_production_order,
     release_raw_materials_for_production_order,
@@ -770,6 +772,62 @@ def reject_production_request(request, order_id: int):
         message = exc.messages[0] if hasattr(exc, "messages") and exc.messages else str(exc)
         messages.error(request, message)
     return redirect("inventory:list")
+
+
+@login_required
+@require_http_methods(["GET"])
+def parts_inventory_list(request):
+    denied = _deny_inventory_view(request)
+    if denied:
+        return denied
+
+    q_filter = request.GET.get("q", "").strip()
+    parts_qs = FinishedProduct.objects.filter(item_type=FinishedProduct.ItemType.PART).annotate(
+        current_stock=Coalesce("stock_record__current_stock", Value(Decimal("0.000")))
+    )
+    if q_filter:
+        parts_qs = parts_qs.filter(
+            Q(name__icontains=q_filter) | Q(sku__icontains=q_filter) | Q(colour__icontains=q_filter)
+        )
+
+    parts_qs = parts_qs.order_by("name", "colour", "sku")
+    paginator = Paginator(parts_qs, 25)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    context = {
+        "items": page_obj.object_list,
+        "page_obj": page_obj,
+        "filter_values": {"q": q_filter},
+    }
+    return render(request, "inventory/parts.html", context)
+
+
+@login_required
+@require_http_methods(["GET"])
+def finished_products_inventory_list(request):
+    denied = _deny_inventory_view(request)
+    if denied:
+        return denied
+
+    q_filter = request.GET.get("q", "").strip()
+    products_qs = FinishedProduct.objects.filter(item_type=FinishedProduct.ItemType.FINISHED).annotate(
+        current_stock=Coalesce("stock_record__current_stock", Value(Decimal("0.000")))
+    )
+    if q_filter:
+        products_qs = products_qs.filter(
+            Q(name__icontains=q_filter) | Q(sku__icontains=q_filter)
+        )
+
+    products_qs = products_qs.order_by("name", "sku")
+    paginator = Paginator(products_qs, 25)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    context = {
+        "items": page_obj.object_list,
+        "page_obj": page_obj,
+        "filter_values": {"q": q_filter},
+    }
+    return render(request, "inventory/finished_products.html", context)
 
 
 @login_required

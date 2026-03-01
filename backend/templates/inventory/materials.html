@@ -69,7 +69,7 @@
               <th>Planned Qty</th>
               <th>Requested By</th>
               <th>Requested At</th>
-              <th>Required Materials</th>
+              <th>Required Components</th>
               <th>Action</th>
             </tr>
           </thead>
@@ -83,7 +83,7 @@
                 <td>{{ order.created_at|date:'Y-m-d H:i' }}</td>
                 <td>
                   {% for consumption in order.consumptions.all %}
-                    {{ consumption.material.name }}{% if consumption.material.colour_code and consumption.material.colour_code != 'NA' %} ({{ consumption.material.colour_code }}){% endif %}: {{ consumption.required_qty }} {{ consumption.material.unit }}{% if not forloop.last %}<br>{% endif %}
+                    {{ consumption.component_name }}: {{ consumption.required_qty }} {{ consumption.component_unit }}{% if not forloop.last %}<br>{% endif %}
                   {% empty %}
                     -
                   {% endfor %}

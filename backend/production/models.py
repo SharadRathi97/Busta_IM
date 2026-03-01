@@ -6,34 +6,118 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from inventory.models import InventoryLedger, RawMaterial
 
 
 class FinishedProduct(models.Model):
+    class ItemType(models.TextChoices):
+        FINISHED = "finished", "Finished Product"
+        PART = "part", "Part"
+
     name = models.CharField(max_length=150)
     sku = models.CharField(max_length=50, unique=True)
+    item_type = models.CharField(max_length=16, choices=ItemType.choices, default=ItemType.FINISHED)
+    colour = models.CharField(max_length=80, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["name"]
 
     def __str__(self) -> str:
+        if self.is_part and self.colour:
+            return f"{self.name} [{self.colour}] ({self.sku})"
         return f"{self.name} ({self.sku})"
+
+    @property
+    def is_part(self) -> bool:
+        return self.item_type == self.ItemType.PART
 
 
 class BOMItem(models.Model):
     product = models.ForeignKey(FinishedProduct, on_delete=models.CASCADE, related_name="bom_items")
-    material = models.ForeignKey(RawMaterial, on_delete=models.PROTECT, related_name="bom_usage")
+    material = models.ForeignKey(
+        RawMaterial,
+        on_delete=models.PROTECT,
+        related_name="bom_usage",
+        null=True,
+        blank=True,
+    )
+    part = models.ForeignKey(
+        FinishedProduct,
+        on_delete=models.PROTECT,
+        related_name="used_in_bom_items",
+        null=True,
+        blank=True,
+    )
     qty_per_unit = models.DecimalField(max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))])
 
     class Meta:
-        unique_together = ("product", "material")
-        ordering = ["product__name", "material__name"]
+        ordering = ["product__name", "id"]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    (Q(material__isnull=False) & Q(part__isnull=True))
+                    | (Q(material__isnull=True) & Q(part__isnull=False))
+                ),
+                name="production_bomitem_exactly_one_component",
+            ),
+            models.UniqueConstraint(
+                fields=["product", "material"],
+                condition=Q(material__isnull=False),
+                name="production_bomitem_product_material_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["product", "part"],
+                condition=Q(part__isnull=False),
+                name="production_bomitem_product_part_unique",
+            ),
+        ]
 
     def __str__(self) -> str:
-        return f"{self.product} -> {self.material}: {self.qty_per_unit}"
+        if self.material_id:
+            return f"{self.product} -> {self.material}: {self.qty_per_unit}"
+        return f"{self.product} -> {self.part}: {self.qty_per_unit}"
+
+    @property
+    def component_name(self) -> str:
+        if self.material_id:
+            return self.material.name
+        if self.part_id:
+            if self.part.colour:
+                return f"{self.part.name} ({self.part.colour})"
+            return self.part.name
+        return "-"
+
+    @property
+    def component_code(self) -> str:
+        if self.material_id:
+            return self.material.code
+        if self.part_id:
+            return self.part.sku
+        return "-"
+
+    @property
+    def component_unit(self) -> str:
+        if self.material_id:
+            return self.material.unit
+        return "units"
+
+    @property
+    def component_cost_per_unit(self) -> Decimal:
+        if self.material_id:
+            return self.material.cost_per_unit
+        return Decimal("0.000")
+
+    @property
+    def component_key(self) -> str:
+        if self.material_id:
+            return f"raw:{self.material_id}"
+        if self.part_id:
+            return f"part:{self.part_id}"
+        return ""
 
 
 class ProductionOrder(models.Model):
@@ -86,11 +170,35 @@ class ProductionOrder(models.Model):
 
 class ProductionConsumption(models.Model):
     production_order = models.ForeignKey(ProductionOrder, on_delete=models.CASCADE, related_name="consumptions")
-    material = models.ForeignKey(RawMaterial, on_delete=models.PROTECT)
+    material = models.ForeignKey(RawMaterial, on_delete=models.PROTECT, null=True, blank=True)
+    part = models.ForeignKey(FinishedProduct, on_delete=models.PROTECT, null=True, blank=True)
     required_qty = models.DecimalField(max_digits=12, decimal_places=3)
 
     class Meta:
         ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    (Q(material__isnull=False) & Q(part__isnull=True))
+                    | (Q(material__isnull=True) & Q(part__isnull=False))
+                ),
+                name="production_consumption_exactly_one_component",
+            ),
+        ]
+
+    @property
+    def component_name(self) -> str:
+        if self.material_id:
+            return self.material.name
+        if self.part_id:
+            return self.part.name
+        return "-"
+
+    @property
+    def component_unit(self) -> str:
+        if self.material_id:
+            return self.material.unit
+        return "units"
 
 
 class FinishedStock(models.Model):
@@ -125,27 +233,47 @@ class FinishedStockLedger(models.Model):
 
 
 def create_production_order_and_deduct_stock(*, product: FinishedProduct, quantity: int, notes: str, created_by):
-    bom_items = list(BOMItem.objects.select_related("material").filter(product=product))
+    bom_items = list(BOMItem.objects.select_related("material", "part").filter(product=product))
     if not bom_items:
         raise ValidationError("No BOM defined for selected product.")
 
-    material_ids = [item.material_id for item in bom_items]
+    material_ids = [item.material_id for item in bom_items if item.material_id]
+    part_ids = [item.part_id for item in bom_items if item.part_id]
 
     with transaction.atomic():
         materials = {
             m.id: m
             for m in RawMaterial.objects.select_for_update().filter(id__in=material_ids)
         }
+        part_stocks = {
+            stock.product_id: stock
+            for stock in FinishedStock.objects.select_for_update().filter(product_id__in=part_ids)
+        }
 
         shortages: list[str] = []
         requirements: list[tuple[BOMItem, Decimal]] = []
         for item in bom_items:
-            material = materials[item.material_id]
             required = (item.qty_per_unit * Decimal(quantity)).quantize(Decimal("0.001"))
             requirements.append((item, required))
-            if material.current_stock < required:
+            if item.material_id:
+                material = materials.get(item.material_id)
+                if not material:
+                    shortages.append(f"Raw material ID {item.material_id} missing from inventory.")
+                    continue
+                if material.current_stock < required:
+                    shortages.append(
+                        f"{material.name}: required {required} {material.unit}, available {material.current_stock}"
+                    )
+                continue
+
+            if not item.part_id:
+                shortages.append("BOM item has no valid component.")
+                continue
+            part_stock = part_stocks.get(item.part_id)
+            available = part_stock.current_stock if part_stock else Decimal("0")
+            if available < required:
                 shortages.append(
-                    f"{material.name}: required {required} {material.unit}, available {material.current_stock}"
+                    f"{item.part.name}: required {required} units, available {available}"
                 )
 
         if shortages:
@@ -162,20 +290,49 @@ def create_production_order_and_deduct_stock(*, product: FinishedProduct, quanti
         )
 
         for item, required in requirements:
-            material = materials[item.material_id]
-            material.current_stock -= required
-            material.save(update_fields=["current_stock"])
+            if item.material_id:
+                material = materials[item.material_id]
+                material.current_stock -= required
+                material.save(update_fields=["current_stock"])
+
+                ProductionConsumption.objects.create(
+                    production_order=order,
+                    material=material,
+                    part=None,
+                    required_qty=required,
+                )
+                InventoryLedger.objects.create(
+                    material=material,
+                    txn_type=InventoryLedger.TxnType.OUT,
+                    quantity=required,
+                    unit=material.unit,
+                    reason=f"Consumed by production order #{order.id}",
+                    reference_type="production_order",
+                    reference_id=order.id,
+                    created_by=created_by,
+                )
+                continue
+
+            part_stock = part_stocks.get(item.part_id)
+            if not part_stock:
+                part_stock, _created = FinishedStock.objects.select_for_update().get_or_create(
+                    product=item.part,
+                    defaults={"current_stock": Decimal("0")},
+                )
+                part_stocks[item.part_id] = part_stock
+            part_stock.current_stock -= required
+            part_stock.save(update_fields=["current_stock"])
 
             ProductionConsumption.objects.create(
                 production_order=order,
-                material=material,
+                material=None,
+                part=item.part,
                 required_qty=required,
             )
-            InventoryLedger.objects.create(
-                material=material,
-                txn_type=InventoryLedger.TxnType.OUT,
+            FinishedStockLedger.objects.create(
+                product=item.part,
+                txn_type=FinishedStockLedger.TxnType.OUT,
                 quantity=required,
-                unit=material.unit,
                 reason=f"Consumed by production order #{order.id}",
                 reference_type="production_order",
                 reference_id=order.id,
@@ -186,7 +343,7 @@ def create_production_order_and_deduct_stock(*, product: FinishedProduct, quanti
 
 
 def create_production_order_with_rm_request(*, product: FinishedProduct, quantity: int, notes: str, created_by):
-    bom_items = list(BOMItem.objects.select_related("material").filter(product=product))
+    bom_items = list(BOMItem.objects.select_related("material", "part").filter(product=product))
     if not bom_items:
         raise ValidationError("No BOM defined for selected product.")
 
@@ -205,6 +362,7 @@ def create_production_order_with_rm_request(*, product: FinishedProduct, quantit
             ProductionConsumption.objects.create(
                 production_order=order,
                 material=item.material,
+                part=item.part,
                 required_qty=required,
             )
     return order
@@ -222,36 +380,74 @@ def release_raw_materials_for_production_order(*, production_order: ProductionOr
         if locked_order.raw_material_released:
             raise ValidationError("Raw materials are already released for this production order.")
 
-        consumptions = list(locked_order.consumptions.select_related("material"))
+        consumptions = list(locked_order.consumptions.select_related("material", "part"))
         if not consumptions:
-            raise ValidationError("No raw material requirements found for this production order.")
+            raise ValidationError("No BOM requirements found for this production order.")
 
-        material_ids = [item.material_id for item in consumptions]
+        material_ids = [item.material_id for item in consumptions if item.material_id]
+        part_ids = [item.part_id for item in consumptions if item.part_id]
         materials = {m.id: m for m in RawMaterial.objects.select_for_update().filter(id__in=material_ids)}
+        part_stocks = {
+            stock.product_id: stock
+            for stock in FinishedStock.objects.select_for_update().filter(product_id__in=part_ids)
+        }
 
         shortages: list[str] = []
         for consumption in consumptions:
-            material = materials.get(consumption.material_id)
-            if not material:
-                shortages.append(f"Material ID {consumption.material_id} missing from inventory.")
+            if consumption.material_id:
+                material = materials.get(consumption.material_id)
+                if not material:
+                    shortages.append(f"Raw material ID {consumption.material_id} missing from inventory.")
+                    continue
+                if material.current_stock < consumption.required_qty:
+                    shortages.append(
+                        f"{material.name}: required {consumption.required_qty} {material.unit}, available {material.current_stock}"
+                    )
                 continue
-            if material.current_stock < consumption.required_qty:
+
+            if not consumption.part_id:
+                shortages.append("Invalid BOM requirement without component.")
+                continue
+            part_stock = part_stocks.get(consumption.part_id)
+            available = part_stock.current_stock if part_stock else Decimal("0")
+            if available < consumption.required_qty:
                 shortages.append(
-                    f"{material.name}: required {consumption.required_qty} {material.unit}, available {material.current_stock}"
+                    f"{consumption.part.name}: required {consumption.required_qty} units, available {available}"
                 )
 
         if shortages:
             raise ValidationError("Insufficient stock for release. " + "; ".join(shortages))
 
         for consumption in consumptions:
-            material = materials[consumption.material_id]
-            material.current_stock -= consumption.required_qty
-            material.save(update_fields=["current_stock"])
-            InventoryLedger.objects.create(
-                material=material,
-                txn_type=InventoryLedger.TxnType.OUT,
+            if consumption.material_id:
+                material = materials[consumption.material_id]
+                material.current_stock -= consumption.required_qty
+                material.save(update_fields=["current_stock"])
+                InventoryLedger.objects.create(
+                    material=material,
+                    txn_type=InventoryLedger.TxnType.OUT,
+                    quantity=consumption.required_qty,
+                    unit=material.unit,
+                    reason=f"Released for production order #{locked_order.id}",
+                    reference_type="production_order",
+                    reference_id=locked_order.id,
+                    created_by=released_by,
+                )
+                continue
+
+            part_stock = part_stocks.get(consumption.part_id)
+            if not part_stock:
+                part_stock, _created = FinishedStock.objects.select_for_update().get_or_create(
+                    product=consumption.part,
+                    defaults={"current_stock": Decimal("0")},
+                )
+                part_stocks[consumption.part_id] = part_stock
+            part_stock.current_stock -= consumption.required_qty
+            part_stock.save(update_fields=["current_stock"])
+            FinishedStockLedger.objects.create(
+                product=consumption.part,
+                txn_type=FinishedStockLedger.TxnType.OUT,
                 quantity=consumption.required_qty,
-                unit=material.unit,
                 reason=f"Released for production order #{locked_order.id}",
                 reference_type="production_order",
                 reference_id=locked_order.id,
@@ -344,21 +540,47 @@ def cancel_production_order(*, production_order: ProductionOrder, cancelled_by) 
             raise ValidationError("Completed production order cannot be cancelled.")
 
         if locked_order.raw_material_released:
-            consumptions = list(locked_order.consumptions.select_related("material"))
-            material_ids = [item.material_id for item in consumptions]
+            consumptions = list(locked_order.consumptions.select_related("material", "part"))
+            material_ids = [item.material_id for item in consumptions if item.material_id]
+            part_ids = [item.part_id for item in consumptions if item.part_id]
             materials = {m.id: m for m in RawMaterial.objects.select_for_update().filter(id__in=material_ids)}
+            part_stocks = {
+                stock.product_id: stock
+                for stock in FinishedStock.objects.select_for_update().filter(product_id__in=part_ids)
+            }
 
             for consumption in consumptions:
-                material = materials.get(consumption.material_id)
-                if not material:
+                if consumption.material_id:
+                    material = materials.get(consumption.material_id)
+                    if not material:
+                        continue
+                    material.current_stock += consumption.required_qty
+                    material.save(update_fields=["current_stock"])
+                    InventoryLedger.objects.create(
+                        material=material,
+                        txn_type=InventoryLedger.TxnType.IN,
+                        quantity=consumption.required_qty,
+                        unit=material.unit,
+                        reason=f"Reverted by cancelling production order #{locked_order.id}",
+                        reference_type="production_order",
+                        reference_id=locked_order.id,
+                        created_by=cancelled_by,
+                    )
                     continue
-                material.current_stock += consumption.required_qty
-                material.save(update_fields=["current_stock"])
-                InventoryLedger.objects.create(
-                    material=material,
-                    txn_type=InventoryLedger.TxnType.IN,
+
+                part_stock = part_stocks.get(consumption.part_id)
+                if not part_stock:
+                    part_stock, _created = FinishedStock.objects.select_for_update().get_or_create(
+                        product=consumption.part,
+                        defaults={"current_stock": Decimal("0")},
+                    )
+                    part_stocks[consumption.part_id] = part_stock
+                part_stock.current_stock += consumption.required_qty
+                part_stock.save(update_fields=["current_stock"])
+                FinishedStockLedger.objects.create(
+                    product=consumption.part,
+                    txn_type=FinishedStockLedger.TxnType.IN,
                     quantity=consumption.required_qty,
-                    unit=material.unit,
                     reason=f"Reverted by cancelling production order #{locked_order.id}",
                     reference_type="production_order",
                     reference_id=locked_order.id,

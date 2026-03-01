@@ -5,15 +5,15 @@ from .models import BOMItem, FinishedProduct, FinishedStock, FinishedStockLedger
 
 @admin.register(FinishedProduct)
 class FinishedProductAdmin(admin.ModelAdmin):
-    list_display = ("name", "sku", "created_at")
-    search_fields = ("name", "sku")
+    list_display = ("name", "colour", "sku", "item_type", "created_at")
+    search_fields = ("name", "colour", "sku")
 
 
 @admin.register(BOMItem)
 class BOMItemAdmin(admin.ModelAdmin):
-    list_display = ("product", "material", "qty_per_unit")
+    list_display = ("product", "material", "part", "qty_per_unit")
     list_filter = ("product",)
-    search_fields = ("product__name", "material__name")
+    search_fields = ("product__name", "material__name", "part__name")
 
 
 class ProductionConsumptionInline(admin.TabularInline):

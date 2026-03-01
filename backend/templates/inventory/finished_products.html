@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Finished Products Inventory | Busta IM{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Finished Products Inventory</h1>
+
+<form method="get" class="card card-soft mb-3 filters-sticky">
+  <div class="card-body">
+    <div class="row g-2">
+      {% include "partials/search_field.html" with label="Search Finished Products" value=filter_values.q placeholder="Search product name or SKU" %}
+      {% include "partials/filter_actions.html" with reset_href=request.path reset_col_class="col-12 col-md-2" %}
+    </div>
+  </div>
+</form>
+
+<div class="card card-soft">
+  <div class="card-body">
+    <div class="table-meta mb-2">{{ page_obj.paginator.count }} finished products</div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Product Name</th>
+              <th>SKU</th>
+              <th>Current Stock</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+              <tr>
+                <td>{{ item.id }}</td>
+                <td>{{ item.name }}</td>
+                <td>{{ item.sku }}</td>
+                <td>{{ item.current_stock|floatformat:3 }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4">No finished products found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% include "partials/pagination.html" with page_obj=page_obj %}
+  </div>
+</div>
+{% endblock %}

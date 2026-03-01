@@ -3,11 +3,13 @@ from __future__ import annotations
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from django.conf import settings
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
@@ -22,6 +24,27 @@ styles = getSampleStyleSheet()
 STYLE_NORMAL_SMALL = ParagraphStyle("normal_small", parent=styles["Normal"], fontSize=8, leading=10)
 STYLE_BOLD_SMALL = ParagraphStyle("bold_small", parent=styles["Normal"], fontSize=8, leading=10, fontName="Helvetica-Bold")
 STYLE_BOLD_MEDIUM = ParagraphStyle("bold_medium", parent=styles["Normal"], fontSize=10, leading=12, fontName="Helvetica-Bold")
+STYLE_TABLE_CELL_LEFT = ParagraphStyle(
+    "table_cell_left",
+    parent=STYLE_NORMAL_SMALL,
+    alignment=TA_LEFT,
+    wordWrap="CJK",
+    splitLongWords=True,
+)
+STYLE_TABLE_CELL_CENTER = ParagraphStyle(
+    "table_cell_center",
+    parent=STYLE_NORMAL_SMALL,
+    alignment=TA_CENTER,
+    wordWrap="CJK",
+    splitLongWords=True,
+)
+STYLE_TABLE_HEADER = ParagraphStyle(
+    "table_header",
+    parent=STYLE_BOLD_SMALL,
+    alignment=TA_CENTER,
+    wordWrap="CJK",
+    splitLongWords=True,
+)
 
 COMPANY_NAME = "BUSTA MOBILITY"
 COMPANY_BILL_TO_LINES = [
@@ -111,6 +134,14 @@ def _resolve_signature_path(candidates: list[Path]) -> Path:
     return candidates[0]
 
 
+def _pdf_cell(value, *, align: str = "left", bold: bool = False) -> Paragraph:
+    style = STYLE_TABLE_CELL_CENTER if align == "center" else STYLE_TABLE_CELL_LEFT
+    text = escape(str(value if value is not None else "-"))
+    if bold:
+        text = f"<b>{text}</b>"
+    return Paragraph(text, style)
+
+
 def purchase_order_to_excel(po: PurchaseOrder) -> bytes:
     wb = Workbook()
     ws = wb.active
@@ -169,7 +200,7 @@ def purchase_order_to_excel(po: PurchaseOrder) -> bytes:
         cell = ws.cell(row=data_row, column=col, value=header)
         cell.font = Font(bold=True)
         cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center")
+        cell.alignment = Alignment(horizontal="center", vertical="top", wrap_text=True)
         cell.border = border
 
     total_amount = Decimal("0")
@@ -193,7 +224,9 @@ def purchase_order_to_excel(po: PurchaseOrder) -> bytes:
             cell = ws.cell(row=data_row, column=col, value=value)
             cell.border = border
             if col in {1, 4, 5, 6, 7, 8}:
-                cell.alignment = Alignment(horizontal="center")
+                cell.alignment = Alignment(horizontal="center", vertical="top", wrap_text=True)
+            else:
+                cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
 
     data_row += 1
     ws.merge_cells(start_row=data_row, start_column=1, end_row=data_row, end_column=7)
@@ -259,6 +292,8 @@ def purchase_order_to_pdf(po: PurchaseOrder) -> bytes:
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 2),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
             ]
         )
     )
@@ -268,7 +303,8 @@ def purchase_order_to_pdf(po: PurchaseOrder) -> bytes:
     right_block.setStyle(
         TableStyle(
             [
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                # Outer border is handled by top_table to avoid double-line misalignment.
+                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.black),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 2),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 2),
@@ -282,8 +318,13 @@ def purchase_order_to_pdf(po: PurchaseOrder) -> bytes:
     top_table.setStyle(
         TableStyle(
             [
-                ("GRID", (0, 0), (-1, -1), 0.8, colors.black),
+                ("BOX", (0, 0), (-1, -1), 0.8, colors.black),
+                ("LINEAFTER", (0, 0), (0, -1), 0.8, colors.black),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
             ]
         )
     )
@@ -313,14 +354,14 @@ def purchase_order_to_pdf(po: PurchaseOrder) -> bytes:
     )
 
     item_rows = [[
-        Paragraph("<b>Sr.No</b>", STYLE_NORMAL_SMALL),
-        Paragraph("<b>Item Code</b>", STYLE_NORMAL_SMALL),
-        Paragraph("<b>Item Name</b>", STYLE_NORMAL_SMALL),
-        Paragraph("<b>HSN / SAC No</b>", STYLE_NORMAL_SMALL),
-        Paragraph("<b>Qty.</b>", STYLE_NORMAL_SMALL),
-        Paragraph("<b>UOM</b>", STYLE_NORMAL_SMALL),
-        Paragraph("<b>Rate</b>", STYLE_NORMAL_SMALL),
-        Paragraph("<b>Amount</b>", STYLE_NORMAL_SMALL),
+        Paragraph("Sr.No", STYLE_TABLE_HEADER),
+        Paragraph("Item Code", STYLE_TABLE_HEADER),
+        Paragraph("Item Name", STYLE_TABLE_HEADER),
+        Paragraph("HSN / SAC No", STYLE_TABLE_HEADER),
+        Paragraph("Qty.", STYLE_TABLE_HEADER),
+        Paragraph("UOM", STYLE_TABLE_HEADER),
+        Paragraph("Rate", STYLE_TABLE_HEADER),
+        Paragraph("Amount", STYLE_TABLE_HEADER),
     ]]
     total_amount = Decimal("0")
     for index, item in enumerate(po.items.select_related("material").all(), start=1):
@@ -329,14 +370,14 @@ def purchase_order_to_pdf(po: PurchaseOrder) -> bytes:
         total_amount += amount
         item_rows.append(
             [
-                str(index),
-                item.material.rm_id or item.material.code or f"RM-{item.material_id}",
-                item.material.name,
-                item.material.code or "-",
-                _format_qty(item.quantity),
-                item.unit,
-                _format_money(rate),
-                _format_money(amount),
+                _pdf_cell(index, align="center"),
+                _pdf_cell(item.material.rm_id or item.material.code or f"RM-{item.material_id}", align="center"),
+                _pdf_cell(item.material.name, align="left"),
+                _pdf_cell(item.material.code or "-", align="center"),
+                _pdf_cell(_format_qty(item.quantity), align="center"),
+                _pdf_cell(item.unit, align="center"),
+                _pdf_cell(_format_money(rate), align="center"),
+                _pdf_cell(_format_money(amount), align="center"),
             ]
         )
 
@@ -347,9 +388,9 @@ def purchase_order_to_pdf(po: PurchaseOrder) -> bytes:
             "",
             "",
             "",
-            Paragraph("<b>Total</b>", STYLE_NORMAL_SMALL),
+            _pdf_cell("Total", align="center", bold=True),
             "",
-            Paragraph(f"<b>{_format_money(total_amount)}</b>", STYLE_NORMAL_SMALL),
+            _pdf_cell(_format_money(total_amount), align="center", bold=True),
         ]
     )
 
@@ -363,9 +404,14 @@ def purchase_order_to_pdf(po: PurchaseOrder) -> bytes:
                 ("GRID", (0, 0), (-1, -1), 0.6, colors.black),
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e6e6e6")),
                 ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("ALIGN", (0, 1), (0, -1), "CENTER"),
                 ("ALIGN", (3, 1), (-1, -1), "CENTER"),
+                ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
                 ("SPAN", (0, -1), (4, -1)),
                 ("ALIGN", (0, -1), (-1, -1), "CENTER"),
             ]
