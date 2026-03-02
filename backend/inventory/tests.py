@@ -245,6 +245,28 @@ class RawMaterialCostTests(TestCase):
         self.assertEqual(material.rm_id, "RMID-CSV-001")
         self.assertEqual(material.colour_code, "BLU")
 
+    def test_raw_material_csv_upload_rejects_duplicate_variant_rows_in_same_file(self):
+        self.client.force_login(self.user)
+        csv_content = (
+            "name,rm_id,code,material_type,colour,colour_code,unit,cost_per_unit,vendor_gst_number,additional_vendor_gst_numbers,opening_stock,reorder_level\n"
+            "CSV Canvas Blue,RMID-CSV-002,RM-CSV-BLU,fabric,Blue,BLU,m,44.500,29ABCDE5678F1Z5,,120.000,25.000\n"
+            "CSV Canvas Blue Duplicate,RMID-CSV-002,RM-CSV-BLU-2,fabric,Blue,BLU,m,44.500,29ABCDE5678F1Z5,,20.000,5.000\n"
+        )
+        upload = SimpleUploadedFile("materials.csv", csv_content.encode("utf-8"), content_type="text/csv")
+
+        response = self.client.post(
+            reverse("inventory:list"),
+            {
+                "action": "upload_csv",
+                "csv_file": upload,
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "duplicate RM ID + Colour Code in this CSV")
+        self.assertFalse(RawMaterial.objects.filter(rm_id="RMID-CSV-002", colour_code="BLU").exists())
+
     def test_delete_raw_material_removes_vendor_and_bom_mappings(self):
         self.client.force_login(self.user)
         extra_vendor = Partner.objects.create(

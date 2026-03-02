@@ -247,6 +247,7 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
 
     payloads: list[dict] = []
     errors: list[str] = []
+    seen_variant_rows: dict[tuple[str, str], int] = {}
 
     for row_number, row in enumerate(rows, start=2):
         vendor = _resolve_supplier_by_gst(row.get("vendor_gst_number", ""))
@@ -294,6 +295,18 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
             errors.append(f"Row {row_number}: {'; '.join(row_errors)}")
             continue
 
+        variant_key = (
+            form.cleaned_data["rm_id"],
+            form.cleaned_data["colour_code"],
+        )
+        previous_row = seen_variant_rows.get(variant_key)
+        if previous_row:
+            errors.append(
+                f"Row {row_number}: duplicate RM ID + Colour Code in this CSV (already in row {previous_row})."
+            )
+            continue
+        seen_variant_rows[variant_key] = row_number
+
         payloads.append(
             {
                 "name": form.cleaned_data["name"],
@@ -314,23 +327,26 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
     if errors:
         raise ValidationError(errors)
 
-    with transaction.atomic():
-        for payload in payloads:
-            create_raw_material_with_opening_stock(
-                name=payload["name"],
-                rm_id=payload["rm_id"],
-                code=payload["code"],
-                material_type=payload["material_type"],
-                colour=payload["colour"],
-                colour_code=payload["colour_code"],
-                unit=payload["unit"],
-                cost_per_unit=payload["cost_per_unit"],
-                vendor=payload["vendor"],
-                additional_vendors=payload["additional_vendors"],
-                opening_stock=payload["opening_stock"],
-                reorder_level=payload["reorder_level"],
-                created_by=created_by,
-            )
+    try:
+        with transaction.atomic():
+            for payload in payloads:
+                create_raw_material_with_opening_stock(
+                    name=payload["name"],
+                    rm_id=payload["rm_id"],
+                    code=payload["code"],
+                    material_type=payload["material_type"],
+                    colour=payload["colour"],
+                    colour_code=payload["colour_code"],
+                    unit=payload["unit"],
+                    cost_per_unit=payload["cost_per_unit"],
+                    vendor=payload["vendor"],
+                    additional_vendors=payload["additional_vendors"],
+                    opening_stock=payload["opening_stock"],
+                    reorder_level=payload["reorder_level"],
+                    created_by=created_by,
+                )
+    except IntegrityError as exc:
+        raise ValidationError("Duplicate raw material entry detected. RM ID + Colour Code must be unique.") from exc
     return len(payloads)
 
 
