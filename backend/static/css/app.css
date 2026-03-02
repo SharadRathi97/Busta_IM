@@ -13,6 +13,25 @@ body {
   max-width: 1400px;
 }
 
+.app-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-brand-logo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  border-radius: 0.35rem;
+  background: #ffffff;
+  padding: 0.1rem;
+}
+
+.app-brand-text {
+  font-weight: 700;
+}
+
 .card-soft {
   border: 1px solid #d1d5db;
   border-radius: 0.75rem;
@@ -147,10 +166,26 @@ body {
 }
 
 .login-wrap {
+  position: relative;
   min-height: 100vh;
   display: grid;
   place-items: center;
   padding: 1rem;
+}
+
+.login-brand {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+}
+
+.login-brand-logo {
+  height: 58px;
+  width: auto;
+  max-width: min(40vw, 240px);
+  object-fit: contain;
 }
 
 .login-card {
@@ -209,5 +244,15 @@ body {
 @media (max-width: 991.98px) {
   .filters-sticky {
     position: static;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .login-wrap {
+    padding-top: 4.25rem;
+  }
+
+  .login-brand-logo {
+    height: 44px;
   }
 }

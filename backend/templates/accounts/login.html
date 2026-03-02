@@ -1,7 +1,11 @@
 {% extends 'base.html' %}
+{% load static %}
 {% block title %}Login | Busta IM{% endblock %}
 {% block content %}
 <div class="login-wrap">
+  <a class="login-brand" href="{% url 'accounts:login' %}">
+    <img src="{% static 'img/logo.jpg' %}" alt="Busta Mobility" class="login-brand-logo">
+  </a>
   <div class="card card-soft login-card">
     <div class="card-body p-4">
       <h1 class="h4 mb-3">Inventory & Production Management</h1>
