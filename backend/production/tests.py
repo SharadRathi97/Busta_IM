@@ -51,6 +51,16 @@ class ProductionOrderFlowTests(TestCase):
             reorder_level=Decimal("10.000"),
             vendor=self.vendor,
         )
+        self.material_alt = RawMaterial.objects.create(
+            name="Recycled Fabric",
+            rm_id="RMID-RECYCLED-001",
+            code="RM-RECYCLE",
+            colour_code="NA",
+            unit=RawMaterial.Unit.METER,
+            current_stock=Decimal("120.000"),
+            reorder_level=Decimal("12.000"),
+            vendor=self.vendor,
+        )
         self.product = FinishedProduct.objects.create(name="Eco Tote", sku="FP-TOTE")
         BOMItem.objects.create(product=self.product, material=self.material, qty_per_unit=Decimal("2.000"))
 
@@ -174,6 +184,39 @@ class ProductionOrderFlowTests(TestCase):
         self.assertEqual(self.material.current_stock, Decimal("100.000"))
         consumption = ProductionConsumption.objects.get(production_order=order, material=self.material)
         self.assertEqual(consumption.required_qty, Decimal("20.000"))
+
+    def test_create_order_with_rm_request_uses_one_time_bom_override(self):
+        order = create_production_order_with_rm_request(
+            product=self.product,
+            quantity=10,
+            notes="Needs release with one-time BOM edit",
+            created_by=self.user,
+            bom_qty_overrides={f"raw:{self.material.id}": Decimal("2.500")},
+        )
+
+        self.assertEqual(order.status, ProductionOrder.Status.AWAITING_RM_RELEASE)
+        consumption = ProductionConsumption.objects.get(production_order=order, material=self.material)
+        self.assertEqual(consumption.required_qty, Decimal("25.000"))
+        self.material.refresh_from_db()
+        self.assertEqual(self.material.current_stock, Decimal("100.000"))
+
+    def test_create_order_with_rm_request_allows_component_swap(self):
+        order = create_production_order_with_rm_request(
+            product=self.product,
+            quantity=10,
+            notes="Swap the material for this one run",
+            created_by=self.user,
+            bom_qty_overrides={f"raw:{self.material.id}": (f"raw:{self.material_alt.id}", Decimal("1.500"))},
+        )
+
+        self.assertEqual(order.status, ProductionOrder.Status.AWAITING_RM_RELEASE)
+        self.assertFalse(ProductionConsumption.objects.filter(production_order=order, material=self.material).exists())
+        swapped = ProductionConsumption.objects.get(production_order=order, material=self.material_alt)
+        self.assertEqual(swapped.required_qty, Decimal("15.000"))
+        self.material.refresh_from_db()
+        self.material_alt.refresh_from_db()
+        self.assertEqual(self.material.current_stock, Decimal("100.000"))
+        self.assertEqual(self.material_alt.current_stock, Decimal("120.000"))
 
     def test_release_rm_request_deducts_stock_and_moves_to_planned(self):
         order = create_production_order_with_rm_request(
@@ -531,6 +574,16 @@ class ProductionOrderActionViewTests(TestCase):
             reorder_level=Decimal("20.000"),
             vendor=self.vendor,
         )
+        self.material_alt = RawMaterial.objects.create(
+            name="Linen Fabric",
+            rm_id="RMID-LINEN-001",
+            code="RM-LINEN",
+            colour_code="NA",
+            unit=RawMaterial.Unit.METER,
+            current_stock=Decimal("150.000"),
+            reorder_level=Decimal("15.000"),
+            vendor=self.vendor,
+        )
         self.product = FinishedProduct.objects.create(name="Carry Bag", sku="FP-CARRY")
         BOMItem.objects.create(product=self.product, material=self.material, qty_per_unit=Decimal("2.000"))
 
@@ -632,6 +685,68 @@ class ProductionOrderActionViewTests(TestCase):
         self.assertFalse(order.raw_material_released)
         self.material.refresh_from_db()
         self.assertEqual(self.material.current_stock, Decimal("200.000"))
+
+    def test_create_order_view_accepts_one_time_bom_override(self):
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            reverse("production:orders"),
+            {
+                "product": str(self.product.id),
+                "quantity": "6",
+                "notes": "UI create request with BOM edit",
+                "bom_row_key": [f"raw:{self.material.id}"],
+                "bom_component_value": [f"raw:{self.material.id}"],
+                "bom_qty_per_unit": ["2.500"],
+            },
+        )
+
+        self.assertRedirects(response, reverse("production:orders"))
+        order = ProductionOrder.objects.latest("id")
+        consumption = ProductionConsumption.objects.get(production_order=order, material=self.material)
+        self.assertEqual(consumption.required_qty, Decimal("15.000"))
+        self.material.refresh_from_db()
+        self.assertEqual(self.material.current_stock, Decimal("200.000"))
+
+    def test_create_order_view_allows_component_change_for_one_time_run(self):
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            reverse("production:orders"),
+            {
+                "product": str(self.product.id),
+                "quantity": "6",
+                "notes": "Switch material for this run",
+                "bom_row_key": [f"raw:{self.material.id}"],
+                "bom_component_value": [f"raw:{self.material_alt.id}"],
+                "bom_qty_per_unit": ["1.500"],
+            },
+        )
+
+        self.assertRedirects(response, reverse("production:orders"))
+        order = ProductionOrder.objects.latest("id")
+        self.assertFalse(ProductionConsumption.objects.filter(production_order=order, material=self.material).exists())
+        swapped = ProductionConsumption.objects.get(production_order=order, material=self.material_alt)
+        self.assertEqual(swapped.required_qty, Decimal("9.000"))
+        self.material.refresh_from_db()
+        self.material_alt.refresh_from_db()
+        self.assertEqual(self.material.current_stock, Decimal("200.000"))
+        self.assertEqual(self.material_alt.current_stock, Decimal("150.000"))
+
+    def test_orders_page_shows_view_bom_option_and_component_details(self):
+        order = create_production_order_with_rm_request(
+            product=self.product,
+            quantity=4,
+            notes="View BOM modal",
+            created_by=self.admin,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("production:orders"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f"orderBomModal{order.id}")
+        self.assertContains(response, "View BOM")
+        self.assertContains(response, self.material.name)
+        self.assertContains(response, self.material.code)
 
     def test_update_status_to_in_progress_blocked_until_rm_release(self):
         order = create_production_order_with_rm_request(

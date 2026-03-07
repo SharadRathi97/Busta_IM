@@ -63,3 +63,24 @@ def require_roles(
 
     messages.error(request, _build_denial_message(action=action, area=area))
     return redirect(redirect_to)
+
+
+def verify_action_password(
+    request: HttpRequest,
+    *,
+    action_label: str,
+    password_field: str = "action_password",
+) -> bool:
+    user = request.user
+    assert isinstance(user, User)
+
+    raw_password = request.POST.get(password_field) or ""
+    if not raw_password:
+        messages.error(request, f"Enter your password to {action_label}.")
+        return False
+
+    if not user.check_password(raw_password):
+        messages.error(request, "Incorrect password. Action not completed.")
+        return False
+
+    return True

@@ -42,28 +42,73 @@
 <div class="card card-soft mb-3">
   <div class="card-body">
     <h2 class="h5">Create Production Order</h2>
-    <form method="post" class="row g-2 align-items-end">
+    <form method="post" class="row g-2 align-items-end" id="createProductionOrderForm">
       {% csrf_token %}
       <input type="hidden" name="next" value="{{ next_url }}">
       <div class="col-12 col-md-4">
         <label class="form-label">{{ create_form.product.label }}</label>
         {{ create_form.product }}
+        {% for error in create_form.product.errors %}
+          <div class="text-danger small">{{ error }}</div>
+        {% endfor %}
       </div>
       <div class="col-12 col-md-2">
         <label class="form-label">{{ create_form.quantity.label }}</label>
         {{ create_form.quantity }}
+        {% for error in create_form.quantity.errors %}
+          <div class="text-danger small">{{ error }}</div>
+        {% endfor %}
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label">{{ create_form.notes.label }}</label>
         {{ create_form.notes }}
+        {% for error in create_form.notes.errors %}
+          <div class="text-danger small">{{ error }}</div>
+        {% endfor %}
       </div>
       <div class="col-12 col-md-2">
-        <button class="btn btn-primary w-100" type="submit">Create</button>
+        <button class="btn btn-primary w-100" type="button" id="reviewBomBtn">Review BOM</button>
       </div>
       {% if create_form.non_field_errors %}
         <div class="col-12 text-danger small">{{ create_form.non_field_errors|join:', ' }}</div>
       {% endif %}
     </form>
+  </div>
+</div>
+
+<div class="modal fade" id="reviewBomModal" tabindex="-1" aria-labelledby="reviewBomModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title h5 mb-0" id="reviewBomModalLabel">Review BOM for Production</h2>
+          <div class="small text-muted">
+            Product: <span id="reviewBomProductName">-</span> · Planned Qty: <span id="reviewBomPlannedQty">0</span>
+          </div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="small text-muted mb-2">Edit component item and qty per unit for this order only. Master BOM will not be changed.</div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Component (This Order)</th>
+                <th>Qty / Unit (This Order)</th>
+                <th>Required Qty</th>
+              </tr>
+            </thead>
+            <tbody id="reviewBomRows"></tbody>
+          </table>
+        </div>
+        <div id="reviewBomEmptyState" class="text-danger small d-none">No BOM is defined for the selected product.</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="confirmCreateOrderBtn" form="createProductionOrderForm">Create Order</button>
+      </div>
+    </div>
   </div>
 </div>
 {% endif %}
@@ -115,6 +160,7 @@
             <th>Status</th>
             <th>Created By</th>
             <th>Completed At</th>
+            <th>BOM Used</th>
             <th>Action</th>
           </tr>
         </thead>
@@ -142,6 +188,11 @@
               </td>
               <td>{{ order.created_by.username|default:'-' }}</td>
               <td>{% if order.completed_at %}{{ order.completed_at|date:'Y-m-d H:i' }}{% else %}-{% endif %}</td>
+              <td>
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#orderBomModal{{ order.id }}">
+                  View BOM
+                </button>
+              </td>
               <td>
                 {% if can_manage %}
                   <div class="d-flex flex-wrap gap-1 align-items-center">
@@ -187,7 +238,7 @@
               </td>
             </tr>
           {% empty %}
-            <tr><td colspan="10">No production orders found.</td></tr>
+            <tr><td colspan="11">No production orders found.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -195,9 +246,61 @@
     {% include "partials/pagination.html" with page_obj=page_obj %}
   </div>
 </div>
+
+{% for order in orders %}
+  <div class="modal fade" id="orderBomModal{{ order.id }}" tabindex="-1" aria-labelledby="orderBomModalLabel{{ order.id }}" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title h5 mb-0" id="orderBomModalLabel{{ order.id }}">BOM Used - Production Order #{{ order.id }}</h2>
+            <div class="small text-muted">
+              {{ order.product.name }} · Planned Qty {{ order.planned_qty|floatformat:3 }}
+            </div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>Qty / Unit Used</th>
+                  <th>Required Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for consumption in order.consumptions.all %}
+                  <tr>
+                    <td>
+                      {{ consumption.component_name }}
+                      <div class="small text-muted">{{ consumption.component_type }} · {{ consumption.component_code }}</div>
+                    </td>
+                    <td>{{ consumption.qty_per_unit_used|floatformat:3 }} {{ consumption.component_unit }}</td>
+                    <td>{{ consumption.required_qty|floatformat:3 }} {{ consumption.component_unit }}</td>
+                  </tr>
+                {% empty %}
+                  <tr><td colspan="3">No BOM consumption rows captured for this order.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endfor %}
 {% endblock %}
 
 {% block scripts %}
+{% if can_manage %}
+  {{ order_bom_map|json_script:"orderBomMapData" }}
+  {{ order_component_option_map|json_script:"orderBomComponentOptionsData" }}
+{% endif %}
 <script>
   (() => {
     const forms = document.querySelectorAll(".production-status-form");
@@ -235,4 +338,211 @@
     });
   })();
 </script>
+
+{% if can_manage %}
+  <script>
+    (() => {
+      const form = document.getElementById("createProductionOrderForm");
+      const openReviewBtn = document.getElementById("reviewBomBtn");
+      const modalEl = document.getElementById("reviewBomModal");
+      const confirmBtn = document.getElementById("confirmCreateOrderBtn");
+      const productSelect = form ? form.querySelector('select[name="product"]') : null;
+      const quantityInput = form ? form.querySelector('input[name="quantity"]') : null;
+      const rowsBody = document.getElementById("reviewBomRows");
+      const emptyState = document.getElementById("reviewBomEmptyState");
+      const productNameEl = document.getElementById("reviewBomProductName");
+      const plannedQtyEl = document.getElementById("reviewBomPlannedQty");
+      const mapNode = document.getElementById("orderBomMapData");
+      const optionsNode = document.getElementById("orderBomComponentOptionsData");
+      if (
+        !form ||
+        !openReviewBtn ||
+        !modalEl ||
+        !confirmBtn ||
+        !productSelect ||
+        !quantityInput ||
+        !rowsBody ||
+        !emptyState ||
+        !productNameEl ||
+        !plannedQtyEl ||
+        !mapNode ||
+        !optionsNode
+      ) {
+        return;
+      }
+
+      const bomByProduct = JSON.parse(mapNode.textContent || "{}");
+      const componentOptionsByProduct = JSON.parse(optionsNode.textContent || "{}");
+      const modal = new bootstrap.Modal(modalEl);
+
+      const normalizeQty = (value) => {
+        const parsed = Number.parseFloat(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return null;
+        }
+        return parsed;
+      };
+
+      const setRequiredCell = (cell, qtyPerUnitInput, quantityValue, unit) => {
+        const perUnit = normalizeQty(qtyPerUnitInput.value);
+        const planned = normalizeQty(quantityValue);
+        if (!perUnit || !planned) {
+          cell.textContent = "-";
+          return;
+        }
+        cell.textContent = `${(perUnit * planned).toFixed(3)} ${unit}`;
+      };
+
+      const validateBeforeOpening = () => {
+        const productId = productSelect.value;
+        const plannedQty = normalizeQty(quantityInput.value);
+        if (!productId) {
+          window.alert("Select a product first.");
+          productSelect.focus();
+          return null;
+        }
+        if (!plannedQty) {
+          window.alert("Enter a valid planned quantity.");
+          quantityInput.focus();
+          return null;
+        }
+        return { productId, plannedQty };
+      };
+
+      const buildReviewRows = (productId, plannedQty) => {
+        rowsBody.replaceChildren();
+        emptyState.classList.add("d-none");
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Create Order";
+
+        const selectedOption = productSelect.options[productSelect.selectedIndex];
+        productNameEl.textContent = selectedOption ? selectedOption.textContent.trim() : "-";
+        plannedQtyEl.textContent = plannedQty.toFixed(3);
+
+        const bomRows = bomByProduct[String(productId)] || [];
+        const componentOptions = componentOptionsByProduct[String(productId)] || [];
+        if (!bomRows.length) {
+          emptyState.classList.remove("d-none");
+          confirmBtn.disabled = true;
+          confirmBtn.textContent = "BOM Missing";
+          return;
+        }
+        if (!componentOptions.length) {
+          emptyState.classList.remove("d-none");
+          confirmBtn.disabled = true;
+          confirmBtn.textContent = "No Components";
+          return;
+        }
+
+        const componentOptionMap = {};
+        componentOptions.forEach((option) => {
+          componentOptionMap[String(option.value)] = option;
+        });
+
+        bomRows.forEach((item, rowIndex) => {
+          const tr = document.createElement("tr");
+
+          const componentCell = document.createElement("td");
+          const componentSelect = document.createElement("select");
+          componentSelect.name = "bom_component_value";
+          componentSelect.form = "createProductionOrderForm";
+          componentSelect.className = "form-select form-select-sm";
+          componentSelect.required = true;
+          componentSelect.id = `bomComponent${rowIndex}`;
+          componentOptions.forEach((optionItem) => {
+            const option = document.createElement("option");
+            option.value = String(optionItem.value);
+            option.textContent = optionItem.label;
+            option.selected = String(optionItem.value) === String(item.key);
+            componentSelect.appendChild(option);
+          });
+
+          const rowKeyInput = document.createElement("input");
+          rowKeyInput.type = "hidden";
+          rowKeyInput.name = "bom_row_key";
+          rowKeyInput.form = "createProductionOrderForm";
+          rowKeyInput.value = item.key;
+
+          const componentMeta = document.createElement("div");
+          componentMeta.className = "small text-muted";
+          const selectedOption = componentOptionMap[String(componentSelect.value)];
+          componentMeta.textContent = selectedOption
+            ? `${selectedOption.component_type} · ${selectedOption.component_code}`
+            : `${item.component_type} · ${item.component_code}`;
+          componentCell.appendChild(componentSelect);
+          componentCell.appendChild(rowKeyInput);
+          componentCell.appendChild(componentMeta);
+
+          const qtyCell = document.createElement("td");
+          const qtyInput = document.createElement("input");
+          qtyInput.type = "number";
+          qtyInput.name = "bom_qty_per_unit";
+          qtyInput.form = "createProductionOrderForm";
+          qtyInput.className = "form-control form-control-sm";
+          qtyInput.min = "0.001";
+          qtyInput.step = "0.001";
+          qtyInput.required = true;
+          qtyInput.value = item.qty_per_unit;
+          qtyInput.id = `bomQtyPerUnit${rowIndex}`;
+
+          qtyCell.appendChild(qtyInput);
+          const unitHint = document.createElement("div");
+          unitHint.className = "small text-muted mt-1";
+          unitHint.textContent = `Unit: ${selectedOption ? selectedOption.unit : item.unit}`;
+          qtyCell.appendChild(unitHint);
+
+          const requiredCell = document.createElement("td");
+          const syncRequiredAndMeta = () => {
+            const current = componentOptionMap[String(componentSelect.value)];
+            if (current) {
+              componentMeta.textContent = `${current.component_type} · ${current.component_code}`;
+              unitHint.textContent = `Unit: ${current.unit}`;
+              setRequiredCell(requiredCell, qtyInput, quantityInput.value, current.unit);
+            } else {
+              setRequiredCell(requiredCell, qtyInput, quantityInput.value, item.unit);
+            }
+          };
+          syncRequiredAndMeta();
+
+          qtyInput.addEventListener("input", () => {
+            syncRequiredAndMeta();
+          });
+          componentSelect.addEventListener("change", syncRequiredAndMeta);
+
+          tr.appendChild(componentCell);
+          tr.appendChild(qtyCell);
+          tr.appendChild(requiredCell);
+          rowsBody.appendChild(tr);
+        });
+      };
+
+      openReviewBtn.addEventListener("click", () => {
+        const validated = validateBeforeOpening();
+        if (!validated) {
+          return;
+        }
+        buildReviewRows(validated.productId, validated.plannedQty);
+        form.dataset.reviewedBom = "0";
+        modal.show();
+      });
+
+      confirmBtn.addEventListener("click", () => {
+        form.dataset.reviewedBom = "1";
+      });
+
+      form.addEventListener("submit", (event) => {
+        if (form.dataset.reviewedBom === "1") {
+          form.dataset.reviewedBom = "0";
+          return;
+        }
+        event.preventDefault();
+        openReviewBtn.click();
+      });
+
+      modalEl.addEventListener("hidden.bs.modal", () => {
+        form.dataset.reviewedBom = "0";
+      });
+    })();
+  </script>
+{% endif %}
 {% endblock %}

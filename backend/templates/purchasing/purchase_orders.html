@@ -226,16 +226,18 @@
               <td>
                 <div class="d-flex flex-wrap gap-1">
                   {% if can_inventory_approve_po and not po.inventory_approved_at %}
-                    <form method="post" action="{% url 'purchasing:approve_inventory' po.id %}">
+                    <form method="post" action="{% url 'purchasing:approve_inventory' po.id %}" class="reauth-form" data-reauth-label="approve this purchase order">
                       {% csrf_token %}
                       <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                      <input type="hidden" name="action_password" value="">
                       <button type="submit" class="btn btn-sm btn-outline-primary">Approve (Inventory)</button>
                     </form>
                   {% endif %}
                   {% if can_admin_approve_po and not po.admin_approved_at %}
-                    <form method="post" action="{% url 'purchasing:approve_admin' po.id %}">
+                    <form method="post" action="{% url 'purchasing:approve_admin' po.id %}" class="reauth-form" data-reauth-label="approve this purchase order">
                       {% csrf_token %}
                       <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                      <input type="hidden" name="action_password" value="">
                       <button type="submit" class="btn btn-sm btn-outline-dark">Approve (Admin)</button>
                     </form>
                   {% endif %}
@@ -379,6 +381,32 @@
 {% block scripts %}
 {{ vendor_material_map|json_script:"poVendorMaterialMapData" }}
 {{ line_rows_seed|json_script:"poLineRowsSeedData" }}
+<script>
+  (() => {
+    const forms = document.querySelectorAll(".reauth-form");
+    forms.forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        const actionLabel = form.dataset.reauthLabel || "complete this action";
+        const password = window.prompt(`Enter your password to ${actionLabel}:`);
+        if (password === null) {
+          event.preventDefault();
+          return;
+        }
+        if (!password.trim()) {
+          window.alert("Password is required for this action.");
+          event.preventDefault();
+          return;
+        }
+        const input = form.querySelector('input[name="action_password"]');
+        if (!input) {
+          event.preventDefault();
+          return;
+        }
+        input.value = password;
+      });
+    });
+  })();
+</script>
 <script>
   (() => {
     const createVendorSelect = document.getElementById("id_vendor");

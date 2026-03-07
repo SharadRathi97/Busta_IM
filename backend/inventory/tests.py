@@ -532,7 +532,10 @@ class ProductionRMRequestInventoryActionTests(TestCase):
             created_by=self.production_manager,
         )
         self.client.force_login(self.inventory_manager)
-        response = self.client.post(reverse("inventory:release_production_request", args=[order.id]))
+        response = self.client.post(
+            reverse("inventory:release_production_request", args=[order.id]),
+            {"action_password": "test12345"},
+        )
 
         self.assertRedirects(response, reverse("inventory:list"))
         order.refresh_from_db()
@@ -549,11 +552,36 @@ class ProductionRMRequestInventoryActionTests(TestCase):
             created_by=self.production_manager,
         )
         self.client.force_login(self.inventory_manager)
-        response = self.client.post(reverse("inventory:reject_production_request", args=[order.id]))
+        response = self.client.post(
+            reverse("inventory:reject_production_request", args=[order.id]),
+            {"action_password": "test12345"},
+        )
 
         self.assertRedirects(response, reverse("inventory:list"))
         order.refresh_from_db()
         self.material.refresh_from_db()
         self.assertEqual(order.status, ProductionOrder.Status.CANCELLED)
+        self.assertFalse(order.raw_material_released)
+        self.assertEqual(self.material.current_stock, Decimal("50.000"))
+
+    def test_inventory_manager_cannot_release_rm_request_with_wrong_password(self):
+        order = create_production_order_with_rm_request(
+            product=self.product,
+            quantity=5,
+            notes="Approve",
+            created_by=self.production_manager,
+        )
+        self.client.force_login(self.inventory_manager)
+        response = self.client.post(
+            reverse("inventory:release_production_request", args=[order.id]),
+            {"action_password": "wrong-pass"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Incorrect password. Action not completed.")
+        order.refresh_from_db()
+        self.material.refresh_from_db()
+        self.assertEqual(order.status, ProductionOrder.Status.AWAITING_RM_RELEASE)
         self.assertFalse(order.raw_material_released)
         self.assertEqual(self.material.current_stock, Decimal("50.000"))

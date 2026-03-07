@@ -460,13 +460,19 @@ class PurchaseOrderApprovalWorkflowTests(TestCase):
 
     def test_po_moves_to_final_list_after_both_approvals(self):
         self.client.force_login(self.inventory_manager)
-        self.client.post(reverse("purchasing:approve_inventory", args=[self.pending_order.id]))
+        self.client.post(
+            reverse("purchasing:approve_inventory", args=[self.pending_order.id]),
+            {"action_password": "test12345"},
+        )
         self.pending_order.refresh_from_db()
         self.assertIsNotNone(self.pending_order.inventory_approved_at)
         self.assertIsNone(self.pending_order.admin_approved_at)
 
         self.client.force_login(self.admin)
-        self.client.post(reverse("purchasing:approve_admin", args=[self.pending_order.id]))
+        self.client.post(
+            reverse("purchasing:approve_admin", args=[self.pending_order.id]),
+            {"action_password": "test12345"},
+        )
         self.pending_order.refresh_from_db()
         self.assertIsNotNone(self.pending_order.inventory_approved_at)
         self.assertIsNotNone(self.pending_order.admin_approved_at)
@@ -480,6 +486,7 @@ class PurchaseOrderApprovalWorkflowTests(TestCase):
         self.client.force_login(self.inventory_manager)
         response = self.client.post(
             reverse("purchasing:approve_admin", args=[self.pending_order.id]),
+            {"action_password": "test12345"},
             follow=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -489,10 +496,24 @@ class PurchaseOrderApprovalWorkflowTests(TestCase):
         self.client.force_login(self.viewer)
         response = self.client.post(
             reverse("purchasing:approve_inventory", args=[self.pending_order.id]),
+            {"action_password": "test12345"},
             follow=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "You do not have permission to manage purchase orders.")
+
+    def test_inventory_approval_requires_valid_password(self):
+        self.client.force_login(self.inventory_manager)
+        response = self.client.post(
+            reverse("purchasing:approve_inventory", args=[self.pending_order.id]),
+            {"action_password": "wrong-pass"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Incorrect password. Action not completed.")
+        self.pending_order.refresh_from_db()
+        self.assertIsNone(self.pending_order.inventory_approved_at)
 
     def test_admin_can_delete_pending_purchase_order(self):
         self.client.force_login(self.admin)

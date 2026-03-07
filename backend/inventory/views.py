@@ -16,7 +16,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
-from accounts.permissions import INVENTORY_MANAGE_ROLES, INVENTORY_VIEW_ROLES, require_roles
+from accounts.permissions import INVENTORY_MANAGE_ROLES, INVENTORY_VIEW_ROLES, require_roles, verify_action_password
 from partners.models import Partner
 from production.models import (
     FinishedProduct,
@@ -748,6 +748,8 @@ def release_production_request(request, order_id: int):
     )
     if denied:
         return denied
+    if not verify_action_password(request, action_label="release raw materials"):
+        return redirect("inventory:list")
 
     order = get_object_or_404(ProductionOrder, pk=order_id)
     try:
@@ -776,6 +778,8 @@ def reject_production_request(request, order_id: int):
     )
     if denied:
         return denied
+    if not verify_action_password(request, action_label="reject this production release request"):
+        return redirect("inventory:list")
 
     order = get_object_or_404(ProductionOrder, pk=order_id)
     try:

@@ -90,12 +90,14 @@
                 </td>
                 <td>
                   <div class="d-flex gap-1 flex-wrap">
-                    <form method="post" action="{% url 'inventory:release_production_request' order.id %}">
+                    <form method="post" action="{% url 'inventory:release_production_request' order.id %}" class="reauth-form" data-reauth-label="release raw materials">
                       {% csrf_token %}
+                      <input type="hidden" name="action_password" value="">
                       <button type="submit" class="btn btn-sm btn-outline-success">Release</button>
                     </form>
-                    <form method="post" action="{% url 'inventory:reject_production_request' order.id %}" onsubmit="return confirm('Reject and cancel this production order request?');">
+                    <form method="post" action="{% url 'inventory:reject_production_request' order.id %}" class="reauth-form" data-reauth-label="reject this production release request" onsubmit="return confirm('Reject and cancel this production order request?');">
                       {% csrf_token %}
+                      <input type="hidden" name="action_password" value="">
                       <button type="submit" class="btn btn-sm btn-outline-danger">Reject</button>
                     </form>
                   </div>
@@ -321,6 +323,33 @@
 
 {% block scripts %}
   {% if can_manage %}
+    <script>
+      (() => {
+        const forms = document.querySelectorAll(".reauth-form");
+        forms.forEach((form) => {
+          form.addEventListener("submit", (event) => {
+            const actionLabel = form.dataset.reauthLabel || "complete this action";
+            const password = window.prompt(`Enter your password to ${actionLabel}:`);
+            if (password === null) {
+              event.preventDefault();
+              return;
+            }
+            if (!password.trim()) {
+              window.alert("Password is required for this action.");
+              event.preventDefault();
+              return;
+            }
+            const input = form.querySelector('input[name="action_password"]');
+            if (!input) {
+              event.preventDefault();
+              return;
+            }
+            input.value = password;
+          });
+        });
+      })();
+    </script>
+
     {{ variant_rows_seed|json_script:"materialVariantRowsSeedData" }}
     <script>
       (() => {

@@ -16,7 +16,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods
 
 from accounts.models import User
-from accounts.permissions import PURCHASING_MANAGE_ROLES, PURCHASING_VIEW_ROLES, require_roles
+from accounts.permissions import PURCHASING_MANAGE_ROLES, PURCHASING_VIEW_ROLES, require_roles, verify_action_password
 from inventory.models import RawMaterial
 from partners.models import Partner
 
@@ -516,6 +516,8 @@ def approve_purchase_order_inventory_action(request, po_id: int):
     if not _can_inventory_approve_po(request.user):
         messages.error(request, "Only inventory manager can provide inventory approval.")
         return redirect(_next_url_or_default(request))
+    if not verify_action_password(request, action_label="approve this purchase order"):
+        return redirect(_next_url_or_default(request))
 
     po = get_object_or_404(PurchaseOrder, pk=po_id)
     try:
@@ -543,6 +545,8 @@ def approve_purchase_order_admin_action(request, po_id: int):
         return denied
     if not _can_admin_approve_po(request.user):
         messages.error(request, "Only admin can provide admin approval.")
+        return redirect(_next_url_or_default(request))
+    if not verify_action_password(request, action_label="approve this purchase order"):
         return redirect(_next_url_or_default(request))
 
     po = get_object_or_404(PurchaseOrder, pk=po_id)

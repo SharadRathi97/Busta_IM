@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from io import StringIO
 
 from django.contrib import messages
@@ -155,6 +156,43 @@ def _extract_bom_bulk_rows(post_data):
             }
         )
     return rows
+
+
+def _extract_order_bom_override_map(post_data) -> dict[str, tuple[str, Decimal]] | None:
+    row_keys = post_data.getlist("bom_row_key")
+    component_values = post_data.getlist("bom_component_value")
+    qty_values = post_data.getlist("bom_qty_per_unit")
+
+    if not row_keys and not component_values and not qty_values:
+        return None
+    if len(row_keys) != len(component_values) or len(row_keys) != len(qty_values):
+        raise ValidationError("Invalid BOM changes submitted. Please review and submit again.")
+
+    overrides: dict[str, tuple[str, Decimal]] = {}
+    for row_number, (row_key, component_value, qty_raw) in enumerate(
+        zip(row_keys, component_values, qty_values),
+        start=1,
+    ):
+        normalized_row_key = (row_key or "").strip()
+        normalized_component_value = (component_value or "").strip()
+        normalized_qty = (qty_raw or "").strip()
+        if not normalized_row_key:
+            raise ValidationError(f"BOM row {row_number}: missing component reference.")
+        if normalized_row_key in overrides:
+            raise ValidationError("Duplicate BOM row submitted. Please review and submit again.")
+        if not normalized_component_value:
+            raise ValidationError(f"BOM row {row_number}: select a component item.")
+        if not normalized_qty:
+            raise ValidationError(f"BOM row {row_number}: quantity is required.")
+        try:
+            qty = Decimal(normalized_qty)
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            raise ValidationError(f"BOM row {row_number}: enter a valid quantity.") from exc
+        if qty <= 0:
+            raise ValidationError(f"BOM row {row_number}: quantity must be greater than zero.")
+        overrides[normalized_row_key] = (normalized_component_value, qty.quantize(Decimal("0.001")))
+
+    return overrides
 
 
 def _redirect_products(open_bom_id: int | None = None):
@@ -579,11 +617,13 @@ def production_orders_page(request):
 
         if create_form.is_valid():
             try:
+                bom_qty_overrides = _extract_order_bom_override_map(request.POST)
                 order = create_production_order_with_rm_request(
                     product=create_form.cleaned_data["product"],
                     quantity=create_form.cleaned_data["quantity"],
                     notes=create_form.cleaned_data["notes"],
                     created_by=request.user,
+                    bom_qty_overrides=bom_qty_overrides,
                 )
                 messages.success(
                     request,
@@ -593,7 +633,10 @@ def production_orders_page(request):
             except ValidationError as exc:
                 create_form.add_error(None, str(exc))
 
-    orders = ProductionOrder.objects.select_related("product", "created_by")
+    orders = (
+        ProductionOrder.objects.select_related("product", "created_by")
+        .prefetch_related("consumptions__material", "consumptions__part")
+    )
     status_filter = request.GET.get("status", "").strip()
     product_filter = request.GET.get("product", "").strip()
     q_filter = request.GET.get("q", "").strip()
@@ -619,6 +662,55 @@ def production_orders_page(request):
     paginator = Paginator(orders, 20)
     page_obj = paginator.get_page(request.GET.get("page"))
     status_form = ProductionStatusForm()
+    create_products = list(
+        create_form.fields["product"].queryset.prefetch_related("bom_items__material", "bom_items__part")
+    )
+    raw_component_options = [
+        {
+            "value": f"raw:{material.id}",
+            "label": f"Raw Material - {material.name} ({material.code})",
+            "unit": material.unit,
+            "component_type": "Raw Material",
+            "component_code": material.code,
+            "component_name": material.name,
+        }
+        for material in RawMaterial.objects.order_by("name")
+    ]
+    part_components = list(
+        FinishedProduct.objects.filter(item_type=FinishedProduct.ItemType.PART).order_by("name", "colour", "sku")
+    )
+    order_bom_map: dict[str, list[dict[str, str]]] = {}
+    order_component_option_map: dict[str, list[dict[str, str]]] = {}
+    for product in create_products:
+        order_bom_map[str(product.id)] = [
+            {
+                "key": item.component_key,
+                "component_name": item.component_name,
+                "component_type": "Raw Material" if item.material_id else "Part",
+                "component_code": item.component_code,
+                "unit": item.component_unit,
+                "qty_per_unit": f"{item.qty_per_unit:.3f}",
+            }
+            for item in product.bom_items.all()
+        ]
+        product_options = list(raw_component_options)
+        if product.item_type == FinishedProduct.ItemType.FINISHED:
+            product_options.extend(
+                [
+                    {
+                        "value": f"part:{part.id}",
+                        "label": f"Part - {part.name}{f' [{part.colour}]' if part.colour else ''} ({part.sku})",
+                        "unit": "units",
+                        "component_type": "Part",
+                        "component_code": part.sku,
+                        "component_name": part.name,
+                    }
+                    for part in part_components
+                    if part.id != product.id
+                ]
+            )
+        order_component_option_map[str(product.id)] = product_options
+
     kpi_open_orders = ProductionOrder.objects.filter(
         status__in=[
             ProductionOrder.Status.AWAITING_RM_RELEASE,
@@ -640,6 +732,8 @@ def production_orders_page(request):
         "status_form": status_form,
         "status_choices": ProductionOrder.Status.choices,
         "product_choices": FinishedProduct.objects.order_by("name"),
+        "order_bom_map": order_bom_map,
+        "order_component_option_map": order_component_option_map,
         "filter_values": {
             "status": status_filter,
             "product": product_filter,

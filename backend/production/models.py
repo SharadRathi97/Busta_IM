@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -195,10 +195,32 @@ class ProductionConsumption(models.Model):
         return "-"
 
     @property
+    def component_code(self) -> str:
+        if self.material_id:
+            return self.material.code
+        if self.part_id:
+            return self.part.sku
+        return "-"
+
+    @property
+    def component_type(self) -> str:
+        if self.material_id:
+            return "Raw Material"
+        if self.part_id:
+            return "Part"
+        return "-"
+
+    @property
     def component_unit(self) -> str:
         if self.material_id:
             return self.material.unit
         return "units"
+
+    @property
+    def qty_per_unit_used(self) -> Decimal:
+        if self.production_order.quantity <= 0:
+            return Decimal("0.000")
+        return (self.required_qty / Decimal(self.production_order.quantity)).quantize(Decimal("0.001"))
 
 
 class FinishedStock(models.Model):
@@ -232,13 +254,107 @@ class FinishedStockLedger(models.Model):
         ordering = ["-id"]
 
 
-def create_production_order_and_deduct_stock(*, product: FinishedProduct, quantity: int, notes: str, created_by):
+def _build_bom_requirements(
+    *,
+    product: FinishedProduct,
+    quantity: int,
+    bom_qty_overrides: dict[str, Decimal | tuple[str, Decimal]] | None = None,
+) -> list[tuple[RawMaterial | None, FinishedProduct | None, Decimal]]:
     bom_items = list(BOMItem.objects.select_related("material", "part").filter(product=product))
     if not bom_items:
         raise ValidationError("No BOM defined for selected product.")
 
-    material_ids = [item.material_id for item in bom_items if item.material_id]
-    part_ids = [item.part_id for item in bom_items if item.part_id]
+    if bom_qty_overrides is not None:
+        expected_keys = {item.component_key for item in bom_items}
+        provided_keys = set(bom_qty_overrides.keys())
+        if expected_keys != provided_keys:
+            raise ValidationError("BOM has changed for the selected product. Please review and submit again.")
+
+    requirements: list[tuple[RawMaterial | None, FinishedProduct | None, Decimal]] = []
+    selected_component_keys: set[str] = set()
+
+    def resolve_component_key(component_key: str) -> tuple[RawMaterial | None, FinishedProduct | None]:
+        normalized_key = (component_key or "").strip()
+        if ":" not in normalized_key:
+            raise ValidationError("Select a valid BOM component.")
+
+        prefix, pk_raw = normalized_key.split(":", 1)
+        if not pk_raw.isdigit():
+            raise ValidationError("Select a valid BOM component.")
+
+        component_id = int(pk_raw)
+        if prefix == "raw":
+            material = RawMaterial.objects.filter(pk=component_id).first()
+            if not material:
+                raise ValidationError("Selected raw material is no longer available.")
+            return material, None
+        if prefix == "part":
+            part = FinishedProduct.objects.filter(
+                pk=component_id,
+                item_type=FinishedProduct.ItemType.PART,
+            ).first()
+            if not part:
+                raise ValidationError("Selected part is no longer available.")
+            if part.id == product.id:
+                raise ValidationError("A part cannot include itself as a BOM component.")
+            return None, part
+
+        raise ValidationError("Select a valid BOM component.")
+
+    for item in bom_items:
+        component_key = item.component_key
+        qty_per_unit = item.qty_per_unit
+        if bom_qty_overrides is not None:
+            override_value = bom_qty_overrides.get(item.component_key)
+            if override_value is None:
+                raise ValidationError("BOM has changed for the selected product. Please review and submit again.")
+
+            if isinstance(override_value, tuple):
+                if len(override_value) != 2:
+                    raise ValidationError("Invalid BOM changes submitted. Please review and submit again.")
+                component_key = str(override_value[0]).strip()
+                try:
+                    qty_per_unit = Decimal(override_value[1])
+                except (InvalidOperation, TypeError, ValueError) as exc:
+                    raise ValidationError("Invalid BOM quantity submitted. Please review and submit again.") from exc
+            else:
+                try:
+                    qty_per_unit = Decimal(override_value)
+                except (InvalidOperation, TypeError, ValueError) as exc:
+                    raise ValidationError("Invalid BOM quantity submitted. Please review and submit again.") from exc
+
+        qty_per_unit = qty_per_unit.quantize(Decimal("0.001"))
+        if qty_per_unit <= 0:
+            raise ValidationError("Each BOM quantity must be greater than zero.")
+
+        if component_key in selected_component_keys:
+            raise ValidationError("Duplicate BOM component selected. Each row must use a unique item.")
+        selected_component_keys.add(component_key)
+
+        material, part = resolve_component_key(component_key)
+
+        required = (qty_per_unit * Decimal(quantity)).quantize(Decimal("0.001"))
+        requirements.append((material, part, required))
+
+    return requirements
+
+
+def create_production_order_and_deduct_stock(
+    *,
+    product: FinishedProduct,
+    quantity: int,
+    notes: str,
+    created_by,
+    bom_qty_overrides: dict[str, Decimal | tuple[str, Decimal]] | None = None,
+):
+    requirements = _build_bom_requirements(
+        product=product,
+        quantity=quantity,
+        bom_qty_overrides=bom_qty_overrides,
+    )
+
+    material_ids = [material.id for material, _part, _required in requirements if material]
+    part_ids = [part.id for _material, part, _required in requirements if part]
 
     with transaction.atomic():
         materials = {
@@ -251,29 +367,26 @@ def create_production_order_and_deduct_stock(*, product: FinishedProduct, quanti
         }
 
         shortages: list[str] = []
-        requirements: list[tuple[BOMItem, Decimal]] = []
-        for item in bom_items:
-            required = (item.qty_per_unit * Decimal(quantity)).quantize(Decimal("0.001"))
-            requirements.append((item, required))
-            if item.material_id:
-                material = materials.get(item.material_id)
-                if not material:
-                    shortages.append(f"Raw material ID {item.material_id} missing from inventory.")
+        for material, part, required in requirements:
+            if material:
+                locked_material = materials.get(material.id)
+                if not locked_material:
+                    shortages.append(f"Raw material ID {material.id} missing from inventory.")
                     continue
-                if material.current_stock < required:
+                if locked_material.current_stock < required:
                     shortages.append(
-                        f"{material.name}: required {required} {material.unit}, available {material.current_stock}"
+                        f"{locked_material.name}: required {required} {locked_material.unit}, available {locked_material.current_stock}"
                     )
                 continue
 
-            if not item.part_id:
+            if not part:
                 shortages.append("BOM item has no valid component.")
                 continue
-            part_stock = part_stocks.get(item.part_id)
+            part_stock = part_stocks.get(part.id)
             available = part_stock.current_stock if part_stock else Decimal("0")
             if available < required:
                 shortages.append(
-                    f"{item.part.name}: required {required} units, available {available}"
+                    f"{part.name}: required {required} units, available {available}"
                 )
 
         if shortages:
@@ -289,9 +402,9 @@ def create_production_order_and_deduct_stock(*, product: FinishedProduct, quanti
             created_by=created_by,
         )
 
-        for item, required in requirements:
-            if item.material_id:
-                material = materials[item.material_id]
+        for material, part, required in requirements:
+            if material:
+                material = materials[material.id]
                 material.current_stock -= required
                 material.save(update_fields=["current_stock"])
 
@@ -313,24 +426,26 @@ def create_production_order_and_deduct_stock(*, product: FinishedProduct, quanti
                 )
                 continue
 
-            part_stock = part_stocks.get(item.part_id)
+            if not part:
+                raise ValidationError("BOM item has no valid component.")
+            part_stock = part_stocks.get(part.id)
             if not part_stock:
                 part_stock, _created = FinishedStock.objects.select_for_update().get_or_create(
-                    product=item.part,
+                    product=part,
                     defaults={"current_stock": Decimal("0")},
                 )
-                part_stocks[item.part_id] = part_stock
+                part_stocks[part.id] = part_stock
             part_stock.current_stock -= required
             part_stock.save(update_fields=["current_stock"])
 
             ProductionConsumption.objects.create(
                 production_order=order,
                 material=None,
-                part=item.part,
+                part=part,
                 required_qty=required,
             )
             FinishedStockLedger.objects.create(
-                product=item.part,
+                product=part,
                 txn_type=FinishedStockLedger.TxnType.OUT,
                 quantity=required,
                 reason=f"Consumed by production order #{order.id}",
@@ -342,10 +457,19 @@ def create_production_order_and_deduct_stock(*, product: FinishedProduct, quanti
     return order
 
 
-def create_production_order_with_rm_request(*, product: FinishedProduct, quantity: int, notes: str, created_by):
-    bom_items = list(BOMItem.objects.select_related("material", "part").filter(product=product))
-    if not bom_items:
-        raise ValidationError("No BOM defined for selected product.")
+def create_production_order_with_rm_request(
+    *,
+    product: FinishedProduct,
+    quantity: int,
+    notes: str,
+    created_by,
+    bom_qty_overrides: dict[str, Decimal | tuple[str, Decimal]] | None = None,
+):
+    requirements = _build_bom_requirements(
+        product=product,
+        quantity=quantity,
+        bom_qty_overrides=bom_qty_overrides,
+    )
 
     with transaction.atomic():
         order = ProductionOrder.objects.create(
@@ -357,12 +481,11 @@ def create_production_order_with_rm_request(*, product: FinishedProduct, quantit
             notes=notes,
             created_by=created_by,
         )
-        for item in bom_items:
-            required = (item.qty_per_unit * Decimal(quantity)).quantize(Decimal("0.001"))
+        for material, part, required in requirements:
             ProductionConsumption.objects.create(
                 production_order=order,
-                material=item.material,
-                part=item.part,
+                material=material,
+                part=part,
                 required_qty=required,
             )
     return order
