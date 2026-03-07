@@ -208,7 +208,7 @@ def create_raw_material_with_opening_stock(
         if resolved_colour_code:
             existing_material = (
                 RawMaterial.objects.select_for_update()
-                .filter(code=resolved_code, colour_code=resolved_colour_code)
+                .filter(code__iexact=resolved_code, colour_code__iexact=resolved_colour_code)
                 .order_by("id")
                 .first()
             )

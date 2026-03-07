@@ -131,18 +131,18 @@ class RawMaterialBaseForm(forms.Form):
             )
             return cleaned
 
-        duplicate_base = RawMaterial.objects.filter(rm_id=rm_id)
+        duplicate_base = RawMaterial.objects.filter(rm_id__iexact=rm_id)
         if self.material:
             duplicate_base = duplicate_base.exclude(pk=self.material.pk)
 
         if colour_code:
-            duplicate_vendor_colour = duplicate_base.filter(colour_code=colour_code)
-            if duplicate_vendor_colour.exists() and not duplicate_vendor_colour.filter(code=resolved_code).exists():
+            duplicate_vendor_colour = duplicate_base.filter(colour_code__iexact=colour_code)
+            if duplicate_vendor_colour.exists() and not duplicate_vendor_colour.filter(code__iexact=resolved_code).exists():
                 self.add_error(
                     "colour_code",
                     "This RM ID and Vendor Colour Code combination already exists with a different material code.",
                 )
-        if pantone_number and duplicate_base.filter(pantone_number=pantone_number).exists():
+        if pantone_number and duplicate_base.filter(pantone_number__iexact=pantone_number).exists():
             self.add_error("pantone_number", "This RM ID and Pantone Number combination already exists.")
 
         cleaned["code"] = resolved_code

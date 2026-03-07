@@ -335,6 +335,47 @@ class RawMaterialCostTests(TestCase):
             1,
         )
 
+    def test_create_material_merges_existing_case_insensitive_code_and_colour_code(self):
+        self.client.force_login(self.user)
+        material = RawMaterial.objects.create(
+            name="Legacy Case Canvas",
+            rm_id="rmid-case-001",
+            code="rmid-case-001-blu",
+            material_type=RawMaterial.MaterialType.FABRIC,
+            colour="Blue",
+            colour_code="blu",
+            unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("40.000"),
+            current_stock=Decimal("10.000"),
+            reorder_level=Decimal("2.000"),
+            vendor=self.vendor,
+        )
+
+        response = self.client.post(
+            reverse("inventory:list"),
+            {
+                "action": "create_material",
+                "name": "Legacy Case Canvas",
+                "rm_id": "RMID-CASE-001",
+                "material_type": RawMaterial.MaterialType.FABRIC,
+                "unit": RawMaterial.Unit.METER,
+                "cost_per_unit": "50.000",
+                "vendor": str(self.vendor.id),
+                "reorder_level": "5.000",
+                "variant_colour": ["Blue"],
+                "variant_colour_code": ["BLU"],
+                "variant_pantone_number": [""],
+                "variant_code": ["RMID-CASE-001-BLU"],
+                "variant_opening_stock": ["5.000"],
+            },
+        )
+
+        self.assertRedirects(response, reverse("inventory:list"))
+        material.refresh_from_db()
+        self.assertEqual(RawMaterial.objects.filter(pk=material.id).count(), 1)
+        self.assertEqual(material.current_stock, Decimal("15.000"))
+        self.assertEqual(material.cost_per_unit, Decimal("43.333"))
+
     def test_create_material_rejects_duplicate_rm_id_and_colour_code_in_same_submit(self):
         self.client.force_login(self.user)
 
