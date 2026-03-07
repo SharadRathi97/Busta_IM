@@ -31,4 +31,297 @@
     </form>
   </div>
 </div>
+
+<datalist id="rmNameSuggestions">
+  {% for value in material_autocomplete.name %}<option value="{{ value }}"></option>{% endfor %}
+</datalist>
+<datalist id="rmIdSuggestions">
+  {% for value in material_autocomplete.rm_id %}<option value="{{ value }}"></option>{% endfor %}
+</datalist>
+<datalist id="rmCodeSuggestions">
+  {% for value in material_autocomplete.code %}<option value="{{ value }}"></option>{% endfor %}
+</datalist>
+<datalist id="rmColourSuggestions">
+  {% for value in material_autocomplete.colour %}<option value="{{ value }}"></option>{% endfor %}
+</datalist>
+<datalist id="rmVendorColourCodeSuggestions">
+  {% for value in material_autocomplete.colour_code %}<option value="{{ value }}"></option>{% endfor %}
+</datalist>
+<datalist id="rmPantoneSuggestions">
+  {% for value in material_autocomplete.pantone_number %}<option value="{{ value }}"></option>{% endfor %}
+</datalist>
+<datalist id="rmCostPerUnitSuggestions">
+  {% for value in material_autocomplete.cost_per_unit %}<option value="{{ value }}"></option>{% endfor %}
+</datalist>
+<datalist id="rmReorderLevelSuggestions">
+  {% for value in material_autocomplete.reorder_level %}<option value="{{ value }}"></option>{% endfor %}
+</datalist>
+
+{{ material_autofill_rows|json_script:"materialEditAutofillRowsData" }}
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    (() => {
+      const formEl = document.querySelector('form[method="post"]');
+      const dataNode = document.getElementById("materialEditAutofillRowsData");
+      if (!formEl || !dataNode) {
+        return;
+      }
+
+      let materialRows = [];
+      try {
+        materialRows = JSON.parse(dataNode.textContent || "[]");
+      } catch (error) {
+        materialRows = [];
+      }
+      if (!Array.isArray(materialRows) || !materialRows.length) {
+        return;
+      }
+
+      const fields = {
+        name: document.getElementById("id_name"),
+        rm_id: document.getElementById("id_rm_id"),
+        code: document.getElementById("id_code"),
+        material_type: document.getElementById("id_material_type"),
+        colour: document.getElementById("id_colour"),
+        colour_code: document.getElementById("id_colour_code"),
+        pantone_number: document.getElementById("id_pantone_number"),
+        unit: document.getElementById("id_unit"),
+        cost_per_unit: document.getElementById("id_cost_per_unit"),
+        reorder_level: document.getElementById("id_reorder_level"),
+        vendor_id: document.getElementById("id_vendor"),
+        additional_vendors: document.getElementById("id_additional_vendors"),
+      };
+      const activeFilters = new Set();
+      const isFilterActive = (fieldName) => activeFilters.has(fieldName);
+
+      const normalize = (value) => String(value || "").trim().toLowerCase();
+      const uniqueSorted = (values) =>
+        Array.from(
+          new Set(values.map((value) => String(value || "").trim()).filter((value) => value !== ""))
+        ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+
+      const setDatalistOptions = (datalistId, values) => {
+        const datalist = document.getElementById(datalistId);
+        if (!datalist) {
+          return;
+        }
+        datalist.innerHTML = "";
+        uniqueSorted(values).forEach((value) => {
+          const option = document.createElement("option");
+          option.value = value;
+          datalist.appendChild(option);
+        });
+      };
+
+      const setSelectValue = (selectEl, value) => {
+        if (!selectEl || !value) {
+          return;
+        }
+        const targetValue = String(value);
+        const hasOption = Array.from(selectEl.options).some((option) => option.value === targetValue);
+        if (hasOption) {
+          selectEl.value = targetValue;
+        }
+      };
+
+      const setAdditionalVendorValues = (selectEl, values) => {
+        if (!selectEl || !Array.isArray(values)) {
+          return;
+        }
+        const selected = new Set(values.map((value) => String(value)));
+        Array.from(selectEl.options).forEach((option) => {
+          option.selected = selected.has(option.value);
+        });
+      };
+
+      const getAdditionalVendorCriteria = () => {
+        if (!fields.additional_vendors) {
+          return [];
+        }
+        return Array.from(fields.additional_vendors.selectedOptions).map((option) => String(option.value));
+      };
+
+      const getCriteria = () => ({
+        name: isFilterActive("name") ? normalize(fields.name ? fields.name.value : "") : "",
+        rm_id: isFilterActive("rm_id") ? normalize(fields.rm_id ? fields.rm_id.value : "") : "",
+        code: isFilterActive("code") ? normalize(fields.code ? fields.code.value : "") : "",
+        material_type: isFilterActive("material_type")
+          ? normalize(fields.material_type ? fields.material_type.value : "")
+          : "",
+        colour: isFilterActive("colour") ? normalize(fields.colour ? fields.colour.value : "") : "",
+        colour_code: isFilterActive("colour_code")
+          ? normalize(fields.colour_code ? fields.colour_code.value : "")
+          : "",
+        pantone_number: isFilterActive("pantone_number")
+          ? normalize(fields.pantone_number ? fields.pantone_number.value : "")
+          : "",
+        unit: isFilterActive("unit") ? normalize(fields.unit ? fields.unit.value : "") : "",
+        cost_per_unit: isFilterActive("cost_per_unit")
+          ? normalize(fields.cost_per_unit ? fields.cost_per_unit.value : "")
+          : "",
+        reorder_level: isFilterActive("reorder_level")
+          ? normalize(fields.reorder_level ? fields.reorder_level.value : "")
+          : "",
+        vendor_id: isFilterActive("vendor_id")
+          ? normalize(fields.vendor_id ? fields.vendor_id.value : "")
+          : "",
+        additional_vendor_ids: isFilterActive("additional_vendors")
+          ? getAdditionalVendorCriteria().map((value) => normalize(value))
+          : [],
+      });
+
+      const rowMatchesCriteria = (row, criteria) => {
+        if (criteria.name && !normalize(row.name).includes(criteria.name)) {
+          return false;
+        }
+        if (criteria.rm_id && !normalize(row.rm_id).includes(criteria.rm_id)) {
+          return false;
+        }
+        if (criteria.code && !normalize(row.code).includes(criteria.code)) {
+          return false;
+        }
+        if (criteria.material_type && normalize(row.material_type) !== criteria.material_type) {
+          return false;
+        }
+        if (criteria.colour && !normalize(row.colour).includes(criteria.colour)) {
+          return false;
+        }
+        if (criteria.colour_code && !normalize(row.colour_code).includes(criteria.colour_code)) {
+          return false;
+        }
+        if (criteria.pantone_number && !normalize(row.pantone_number).includes(criteria.pantone_number)) {
+          return false;
+        }
+        if (criteria.unit && normalize(row.unit) !== criteria.unit) {
+          return false;
+        }
+        if (criteria.cost_per_unit && !normalize(row.cost_per_unit).includes(criteria.cost_per_unit)) {
+          return false;
+        }
+        if (criteria.reorder_level && !normalize(row.reorder_level).includes(criteria.reorder_level)) {
+          return false;
+        }
+        if (criteria.vendor_id && normalize(row.vendor_id) !== criteria.vendor_id) {
+          return false;
+        }
+        if (criteria.additional_vendor_ids.length) {
+          const additionalVendorSet = new Set(
+            (row.additional_vendor_ids || []).map((value) => normalize(String(value)))
+          );
+          for (const vendorId of criteria.additional_vendor_ids) {
+            if (!additionalVendorSet.has(vendorId)) {
+              return false;
+            }
+          }
+        }
+        return true;
+      };
+
+      const valuesForKey = (rows, key) => rows.map((row) => row[key]);
+      const uniqueValueForKey = (rows, key) => {
+        const values = uniqueSorted(valuesForKey(rows, key));
+        return values.length === 1 ? values[0] : "";
+      };
+
+      const refreshSuggestions = (matches) => {
+        setDatalistOptions("rmNameSuggestions", valuesForKey(matches, "name"));
+        setDatalistOptions("rmIdSuggestions", valuesForKey(matches, "rm_id"));
+        setDatalistOptions("rmCodeSuggestions", valuesForKey(matches, "code"));
+        setDatalistOptions("rmColourSuggestions", valuesForKey(matches, "colour"));
+        setDatalistOptions("rmVendorColourCodeSuggestions", valuesForKey(matches, "colour_code"));
+        setDatalistOptions("rmPantoneSuggestions", valuesForKey(matches, "pantone_number"));
+        setDatalistOptions("rmCostPerUnitSuggestions", valuesForKey(matches, "cost_per_unit"));
+        setDatalistOptions("rmReorderLevelSuggestions", valuesForKey(matches, "reorder_level"));
+      };
+
+      const applyAutofill = (matches, changedField) => {
+        if (!matches.length) {
+          return;
+        }
+        const mapping = [
+          ["name", fields.name],
+          ["rm_id", fields.rm_id],
+          ["code", fields.code],
+          ["colour", fields.colour],
+          ["colour_code", fields.colour_code],
+          ["pantone_number", fields.pantone_number],
+          ["cost_per_unit", fields.cost_per_unit],
+          ["reorder_level", fields.reorder_level],
+        ];
+        mapping.forEach(([key, element]) => {
+          if (!element || changedField === key) {
+            return;
+          }
+          const value = uniqueValueForKey(matches, key);
+          if (value) {
+            element.value = value;
+          }
+        });
+        if (changedField !== "material_type") {
+          setSelectValue(fields.material_type, uniqueValueForKey(matches, "material_type"));
+        }
+        if (changedField !== "unit") {
+          setSelectValue(fields.unit, uniqueValueForKey(matches, "unit"));
+        }
+        if (changedField !== "vendor_id") {
+          setSelectValue(fields.vendor_id, uniqueValueForKey(matches, "vendor_id"));
+        }
+        if (changedField !== "additional_vendors" && matches.length === 1) {
+          setAdditionalVendorValues(fields.additional_vendors, matches[0].additional_vendor_ids || []);
+        }
+      };
+
+      const refresh = ({ autofill = false, changedField = "" } = {}) => {
+        const criteria = getCriteria();
+        const matches = materialRows.filter((row) => rowMatchesCriteria(row, criteria));
+        refreshSuggestions(matches);
+        if (!autofill) {
+          return;
+        }
+        applyAutofill(matches, changedField);
+        const refreshed = materialRows.filter((row) => rowMatchesCriteria(row, getCriteria()));
+        refreshSuggestions(refreshed);
+      };
+
+      const textFields = [
+        "name",
+        "rm_id",
+        "code",
+        "colour",
+        "colour_code",
+        "pantone_number",
+        "cost_per_unit",
+        "reorder_level",
+      ];
+      textFields.forEach((fieldName) => {
+        const element = fields[fieldName];
+        if (!element) {
+          return;
+        }
+        element.addEventListener("input", () => {
+          activeFilters.add(fieldName);
+          refresh();
+        });
+        element.addEventListener("change", () => {
+          activeFilters.add(fieldName);
+          refresh({ autofill: true, changedField: fieldName });
+        });
+      });
+
+      ["material_type", "unit", "vendor_id", "additional_vendors"].forEach((fieldName) => {
+        const element = fields[fieldName];
+        if (!element) {
+          return;
+        }
+        element.addEventListener("change", () => {
+          activeFilters.add(fieldName);
+          refresh({ autofill: true, changedField: fieldName });
+        });
+      });
+
+      refresh();
+    })();
+  </script>
 {% endblock %}

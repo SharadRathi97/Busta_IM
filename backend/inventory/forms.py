@@ -69,6 +69,18 @@ class RawMaterialBaseForm(forms.Form):
         self.fields["vendor"].queryset = supplier_queryset
         self.fields["additional_vendors"].queryset = supplier_queryset
         self.fields["code"].help_text = "Optional. If left blank, system uses RM ID + Vendor Colour Code or Pantone Number."
+        autocomplete_lists = {
+            "name": "rmNameSuggestions",
+            "rm_id": "rmIdSuggestions",
+            "code": "rmCodeSuggestions",
+            "colour": "rmColourSuggestions",
+            "colour_code": "rmVendorColourCodeSuggestions",
+            "pantone_number": "rmPantoneSuggestions",
+            "cost_per_unit": "rmCostPerUnitSuggestions",
+            "reorder_level": "rmReorderLevelSuggestions",
+        }
+        for field_name, datalist_id in autocomplete_lists.items():
+            self.fields[field_name].widget.attrs["list"] = datalist_id
 
     def clean_code(self):
         return (self.cleaned_data.get("code") or "").strip().upper()
@@ -123,8 +135,13 @@ class RawMaterialBaseForm(forms.Form):
         if self.material:
             duplicate_base = duplicate_base.exclude(pk=self.material.pk)
 
-        if colour_code and duplicate_base.filter(colour_code=colour_code).exists():
-            self.add_error("colour_code", "This RM ID and Vendor Colour Code combination already exists.")
+        if colour_code:
+            duplicate_vendor_colour = duplicate_base.filter(colour_code=colour_code)
+            if duplicate_vendor_colour.exists() and not duplicate_vendor_colour.filter(code=resolved_code).exists():
+                self.add_error(
+                    "colour_code",
+                    "This RM ID and Vendor Colour Code combination already exists with a different material code.",
+                )
         if pantone_number and duplicate_base.filter(pantone_number=pantone_number).exists():
             self.add_error("pantone_number", "This RM ID and Pantone Number combination already exists.")
 
@@ -142,6 +159,10 @@ class RawMaterialCreateForm(RawMaterialBaseForm):
         max_digits=12,
         widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.001"}),
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["opening_stock"].widget.attrs["list"] = "rmOpeningStockSuggestions"
 
 
 class RawMaterialUpdateForm(RawMaterialBaseForm):

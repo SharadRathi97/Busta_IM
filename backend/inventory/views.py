@@ -97,6 +97,75 @@ def _build_sort_state(active_sort: str, active_direction: str):
     return state
 
 
+def _distinct_text_suggestions(field_name: str, *, limit: int = 120) -> list[str]:
+    values = (
+        RawMaterial.objects.exclude(**{field_name: ""})
+        .order_by(field_name)
+        .values_list(field_name, flat=True)
+        .distinct()[:limit]
+    )
+    return [str(value) for value in values if value]
+
+
+def _distinct_decimal_suggestions(field_name: str, *, limit: int = 120) -> list[str]:
+    values = (
+        RawMaterial.objects.order_by(field_name)
+        .values_list(field_name, flat=True)
+        .distinct()[:limit]
+    )
+    return [str(value) for value in values if value is not None]
+
+
+def _build_raw_material_autocomplete() -> dict[str, list[str]]:
+    return {
+        "name": _distinct_text_suggestions("name"),
+        "rm_id": _distinct_text_suggestions("rm_id"),
+        "code": _distinct_text_suggestions("code"),
+        "colour": _distinct_text_suggestions("colour"),
+        "colour_code": _distinct_text_suggestions("colour_code"),
+        "pantone_number": _distinct_text_suggestions("pantone_number"),
+        "cost_per_unit": _distinct_decimal_suggestions("cost_per_unit"),
+        "reorder_level": _distinct_decimal_suggestions("reorder_level"),
+        "opening_stock": _distinct_decimal_suggestions("current_stock"),
+    }
+
+
+def _build_raw_material_autofill_rows(*, limit: int = 1000) -> list[dict[str, object]]:
+    materials = (
+        RawMaterial.objects.select_related("vendor")
+        .prefetch_related("vendor_links")
+        .order_by("id")[:limit]
+    )
+    rows: list[dict[str, object]] = []
+    for material in materials:
+        additional_vendor_ids = sorted(
+            {
+                str(link.vendor_id)
+                for link in material.vendor_links.all()
+                if link.vendor_id and link.vendor_id != material.vendor_id
+            }
+        )
+        rows.append(
+            {
+                "id": material.id,
+                "name": material.name,
+                "rm_id": material.rm_id,
+                "code": material.code,
+                "material_type": material.material_type,
+                "colour": material.colour,
+                "colour_code": material.colour_code,
+                "pantone_number": material.pantone_number,
+                "unit": material.unit,
+                "cost_per_unit": str(material.cost_per_unit),
+                "reorder_level": str(material.reorder_level),
+                "current_stock": str(material.current_stock),
+                "vendor_id": str(material.vendor_id),
+                "additional_vendor_ids": additional_vendor_ids,
+            }
+        )
+    return rows
+
+
 def _get_mro_sorting(sort_key: str, direction: str):
     sort_map = {
         "id": "id",
@@ -641,6 +710,8 @@ def material_list(request):
             .prefetch_related("consumptions__material")
             .order_by("-id")
         )
+    material_autocomplete = _build_raw_material_autocomplete() if can_manage else {}
+    material_autofill_rows = _build_raw_material_autofill_rows() if can_manage else []
 
     context = {
         "materials": page_obj.object_list,
@@ -658,6 +729,8 @@ def material_list(request):
         "pending_production_requests": pending_production_requests,
         "material_type_choices": RawMaterial.MaterialType.choices,
         "supplier_choices": suppliers,
+        "material_autocomplete": material_autocomplete,
+        "material_autofill_rows": material_autofill_rows,
         "filter_values": {
             "q": q_filter,
             "material_type": type_filter,
@@ -726,6 +799,8 @@ def material_edit(request, material_id: int):
     context = {
         "form": form,
         "material": material,
+        "material_autocomplete": _build_raw_material_autocomplete(),
+        "material_autofill_rows": _build_raw_material_autofill_rows(),
     }
     return render(request, "inventory/material_edit.html", context)
 

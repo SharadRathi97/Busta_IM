@@ -322,6 +322,34 @@
       </div>
     </div>
   </div>
+
+  <datalist id="rmNameSuggestions">
+    {% for value in material_autocomplete.name %}<option value="{{ value }}"></option>{% endfor %}
+  </datalist>
+  <datalist id="rmIdSuggestions">
+    {% for value in material_autocomplete.rm_id %}<option value="{{ value }}"></option>{% endfor %}
+  </datalist>
+  <datalist id="rmCodeSuggestions">
+    {% for value in material_autocomplete.code %}<option value="{{ value }}"></option>{% endfor %}
+  </datalist>
+  <datalist id="rmColourSuggestions">
+    {% for value in material_autocomplete.colour %}<option value="{{ value }}"></option>{% endfor %}
+  </datalist>
+  <datalist id="rmVendorColourCodeSuggestions">
+    {% for value in material_autocomplete.colour_code %}<option value="{{ value }}"></option>{% endfor %}
+  </datalist>
+  <datalist id="rmPantoneSuggestions">
+    {% for value in material_autocomplete.pantone_number %}<option value="{{ value }}"></option>{% endfor %}
+  </datalist>
+  <datalist id="rmCostPerUnitSuggestions">
+    {% for value in material_autocomplete.cost_per_unit %}<option value="{{ value }}"></option>{% endfor %}
+  </datalist>
+  <datalist id="rmReorderLevelSuggestions">
+    {% for value in material_autocomplete.reorder_level %}<option value="{{ value }}"></option>{% endfor %}
+  </datalist>
+  <datalist id="rmOpeningStockSuggestions">
+    {% for value in material_autocomplete.opening_stock %}<option value="{{ value }}"></option>{% endfor %}
+  </datalist>
 {% endif %}
 {% endblock %}
 
@@ -355,6 +383,7 @@
     </script>
 
     {{ variant_rows_seed|json_script:"materialVariantRowsSeedData" }}
+    {{ material_autofill_rows|json_script:"materialAutofillRowsData" }}
     <script>
       (() => {
         const button = document.getElementById("uploadMaterialCsvBtn");
@@ -402,6 +431,7 @@
           colourInput.className = "form-control form-control-sm";
           colourInput.placeholder = "e.g. Blue";
           colourInput.value = rowData.colour || "";
+          colourInput.setAttribute("list", "rmColourSuggestions");
 
           const colourCodeInput = document.createElement("input");
           colourCodeInput.type = "text";
@@ -409,6 +439,7 @@
           colourCodeInput.className = "form-control form-control-sm";
           colourCodeInput.placeholder = "e.g. BLU";
           colourCodeInput.value = rowData.colour_code || "";
+          colourCodeInput.setAttribute("list", "rmVendorColourCodeSuggestions");
 
           const pantoneInput = document.createElement("input");
           pantoneInput.type = "text";
@@ -416,6 +447,7 @@
           pantoneInput.className = "form-control form-control-sm";
           pantoneInput.placeholder = "e.g. PANTONE-286 C";
           pantoneInput.value = rowData.pantone_number || "";
+          pantoneInput.setAttribute("list", "rmPantoneSuggestions");
 
           const codeInput = document.createElement("input");
           codeInput.type = "text";
@@ -423,6 +455,7 @@
           codeInput.className = "form-control form-control-sm";
           codeInput.placeholder = "Optional";
           codeInput.value = rowData.code || "";
+          codeInput.setAttribute("list", "rmCodeSuggestions");
 
           const stockInput = document.createElement("input");
           stockInput.type = "number";
@@ -432,6 +465,7 @@
           stockInput.step = "0.001";
           stockInput.required = true;
           stockInput.value = rowData.opening_stock || "";
+          stockInput.setAttribute("list", "rmOpeningStockSuggestions");
 
           const removeBtn = document.createElement("button");
           removeBtn.type = "button";
@@ -485,6 +519,389 @@
         } else {
           createRow({});
         }
+      })();
+    </script>
+    <script>
+      (() => {
+        const formEl = document.getElementById("createMaterialForm");
+        const rowsBody = document.getElementById("materialVariantRows");
+        const dataNode = document.getElementById("materialAutofillRowsData");
+        if (!formEl || !rowsBody || !dataNode) {
+          return;
+        }
+
+        let materialRows = [];
+        try {
+          materialRows = JSON.parse(dataNode.textContent || "[]");
+        } catch (error) {
+          materialRows = [];
+        }
+        if (!Array.isArray(materialRows) || !materialRows.length) {
+          return;
+        }
+
+        const commonFields = {
+          name: document.getElementById("id_name"),
+          rm_id: document.getElementById("id_rm_id"),
+          material_type: document.getElementById("id_material_type"),
+          unit: document.getElementById("id_unit"),
+          cost_per_unit: document.getElementById("id_cost_per_unit"),
+          reorder_level: document.getElementById("id_reorder_level"),
+          vendor_id: document.getElementById("id_vendor"),
+          additional_vendors: document.getElementById("id_additional_vendors"),
+        };
+        const activeCommonFilters = new Set();
+        const isCommonFilterActive = (fieldName) => activeCommonFilters.has(fieldName);
+
+        const normalize = (value) => String(value || "").trim().toLowerCase();
+        const uniqueSorted = (values) =>
+          Array.from(
+            new Set(values.map((value) => String(value || "").trim()).filter((value) => value !== ""))
+          ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+
+        const setDatalistOptions = (datalistId, values) => {
+          const datalist = document.getElementById(datalistId);
+          if (!datalist) {
+            return;
+          }
+          datalist.innerHTML = "";
+          uniqueSorted(values).forEach((value) => {
+            const option = document.createElement("option");
+            option.value = value;
+            datalist.appendChild(option);
+          });
+        };
+
+        const setSelectValue = (selectEl, value) => {
+          if (!selectEl || !value) {
+            return;
+          }
+          const normalizedValue = String(value);
+          const hasOption = Array.from(selectEl.options).some((option) => option.value === normalizedValue);
+          if (!hasOption) {
+            return;
+          }
+          selectEl.value = normalizedValue;
+        };
+
+        const setAdditionalVendorValues = (selectEl, values) => {
+          if (!selectEl || !Array.isArray(values)) {
+            return;
+          }
+          const selected = new Set(values.map((value) => String(value)));
+          Array.from(selectEl.options).forEach((option) => {
+            option.selected = selected.has(option.value);
+          });
+        };
+
+        const getAdditionalVendorCriteria = () => {
+          if (!commonFields.additional_vendors) {
+            return [];
+          }
+          return Array.from(commonFields.additional_vendors.selectedOptions).map((option) => String(option.value));
+        };
+
+        const getCommonCriteria = () => {
+          return {
+            name: isCommonFilterActive("name") ? normalize(commonFields.name ? commonFields.name.value : "") : "",
+            rm_id: isCommonFilterActive("rm_id") ? normalize(commonFields.rm_id ? commonFields.rm_id.value : "") : "",
+            material_type: isCommonFilterActive("material_type")
+              ? normalize(commonFields.material_type ? commonFields.material_type.value : "")
+              : "",
+            unit: isCommonFilterActive("unit") ? normalize(commonFields.unit ? commonFields.unit.value : "") : "",
+            cost_per_unit: isCommonFilterActive("cost_per_unit")
+              ? normalize(commonFields.cost_per_unit ? commonFields.cost_per_unit.value : "")
+              : "",
+            reorder_level: isCommonFilterActive("reorder_level")
+              ? normalize(commonFields.reorder_level ? commonFields.reorder_level.value : "")
+              : "",
+            vendor_id: isCommonFilterActive("vendor_id")
+              ? normalize(commonFields.vendor_id ? commonFields.vendor_id.value : "")
+              : "",
+            additional_vendor_ids: isCommonFilterActive("additional_vendors")
+              ? getAdditionalVendorCriteria().map((value) => normalize(value))
+              : [],
+          };
+        };
+
+        const rowMatchesCommonCriteria = (row, criteria) => {
+          if (criteria.name && !normalize(row.name).includes(criteria.name)) {
+            return false;
+          }
+          if (criteria.rm_id && !normalize(row.rm_id).includes(criteria.rm_id)) {
+            return false;
+          }
+          if (criteria.material_type && normalize(row.material_type) !== criteria.material_type) {
+            return false;
+          }
+          if (criteria.unit && normalize(row.unit) !== criteria.unit) {
+            return false;
+          }
+          if (criteria.cost_per_unit && !normalize(row.cost_per_unit).includes(criteria.cost_per_unit)) {
+            return false;
+          }
+          if (criteria.reorder_level && !normalize(row.reorder_level).includes(criteria.reorder_level)) {
+            return false;
+          }
+          if (criteria.vendor_id && normalize(row.vendor_id) !== criteria.vendor_id) {
+            return false;
+          }
+          if (criteria.additional_vendor_ids.length) {
+            const additionalVendorSet = new Set(
+              (row.additional_vendor_ids || []).map((value) => normalize(String(value)))
+            );
+            for (const vendorId of criteria.additional_vendor_ids) {
+              if (!additionalVendorSet.has(vendorId)) {
+                return false;
+              }
+            }
+          }
+          return true;
+        };
+
+        const getVariantInputMap = (rowEl) => {
+          if (!rowEl) {
+            return null;
+          }
+          return {
+            colour: rowEl.querySelector('input[name="variant_colour"]'),
+            colour_code: rowEl.querySelector('input[name="variant_colour_code"]'),
+            pantone_number: rowEl.querySelector('input[name="variant_pantone_number"]'),
+            code: rowEl.querySelector('input[name="variant_code"]'),
+            opening_stock: rowEl.querySelector('input[name="variant_opening_stock"]'),
+          };
+        };
+
+        const getVariantCriteria = (rowEl) => {
+          const inputMap = getVariantInputMap(rowEl);
+          if (!inputMap) {
+            return null;
+          }
+          return {
+            colour: normalize(inputMap.colour ? inputMap.colour.value : ""),
+            colour_code: normalize(inputMap.colour_code ? inputMap.colour_code.value : ""),
+            pantone_number: normalize(inputMap.pantone_number ? inputMap.pantone_number.value : ""),
+            code: normalize(inputMap.code ? inputMap.code.value : ""),
+          };
+        };
+
+        const rowMatchesVariantCriteria = (row, criteria) => {
+          if (!criteria) {
+            return true;
+          }
+          if (criteria.colour && !normalize(row.colour).includes(criteria.colour)) {
+            return false;
+          }
+          if (criteria.colour_code && !normalize(row.colour_code).includes(criteria.colour_code)) {
+            return false;
+          }
+          if (criteria.pantone_number && !normalize(row.pantone_number).includes(criteria.pantone_number)) {
+            return false;
+          }
+          if (criteria.code && !normalize(row.code).includes(criteria.code)) {
+            return false;
+          }
+          return true;
+        };
+
+        const valuesForKey = (rows, key) => rows.map((row) => row[key]);
+        const uniqueValueForKey = (rows, key) => {
+          const values = uniqueSorted(valuesForKey(rows, key));
+          return values.length === 1 ? values[0] : "";
+        };
+
+        const computeMatches = (activeRow) => {
+          const commonCriteria = getCommonCriteria();
+          const commonMatches = materialRows.filter((row) => rowMatchesCommonCriteria(row, commonCriteria));
+          if (!activeRow) {
+            return { commonMatches, variantMatches: commonMatches };
+          }
+          const variantCriteria = getVariantCriteria(activeRow);
+          const variantMatches = commonMatches.filter((row) => rowMatchesVariantCriteria(row, variantCriteria));
+          return { commonMatches, variantMatches };
+        };
+
+        const updateDatalists = (commonMatches, variantMatches) => {
+          const variantSource = variantMatches.length ? variantMatches : commonMatches;
+          setDatalistOptions("rmNameSuggestions", valuesForKey(commonMatches, "name"));
+          setDatalistOptions("rmIdSuggestions", valuesForKey(commonMatches, "rm_id"));
+          setDatalistOptions("rmCostPerUnitSuggestions", valuesForKey(commonMatches, "cost_per_unit"));
+          setDatalistOptions("rmReorderLevelSuggestions", valuesForKey(commonMatches, "reorder_level"));
+          setDatalistOptions("rmColourSuggestions", valuesForKey(variantSource, "colour"));
+          setDatalistOptions("rmVendorColourCodeSuggestions", valuesForKey(variantSource, "colour_code"));
+          setDatalistOptions("rmPantoneSuggestions", valuesForKey(variantSource, "pantone_number"));
+          setDatalistOptions("rmCodeSuggestions", valuesForKey(variantSource, "code"));
+          setDatalistOptions("rmOpeningStockSuggestions", valuesForKey(variantSource, "current_stock"));
+        };
+
+        const applyCommonAutofill = (candidateRows, changedField) => {
+          if (!candidateRows.length) {
+            return;
+          }
+          if (changedField !== "name") {
+            const value = uniqueValueForKey(candidateRows, "name");
+            if (value && commonFields.name) {
+              commonFields.name.value = value;
+            }
+          }
+          if (changedField !== "rm_id") {
+            const value = uniqueValueForKey(candidateRows, "rm_id");
+            if (value && commonFields.rm_id) {
+              commonFields.rm_id.value = value;
+            }
+          }
+          if (changedField !== "material_type") {
+            setSelectValue(commonFields.material_type, uniqueValueForKey(candidateRows, "material_type"));
+          }
+          if (changedField !== "unit") {
+            setSelectValue(commonFields.unit, uniqueValueForKey(candidateRows, "unit"));
+          }
+          if (changedField !== "cost_per_unit") {
+            const value = uniqueValueForKey(candidateRows, "cost_per_unit");
+            if (value && commonFields.cost_per_unit) {
+              commonFields.cost_per_unit.value = value;
+            }
+          }
+          if (changedField !== "reorder_level") {
+            const value = uniqueValueForKey(candidateRows, "reorder_level");
+            if (value && commonFields.reorder_level) {
+              commonFields.reorder_level.value = value;
+            }
+          }
+          if (changedField !== "vendor_id") {
+            setSelectValue(commonFields.vendor_id, uniqueValueForKey(candidateRows, "vendor_id"));
+          }
+          if (changedField !== "additional_vendors" && candidateRows.length === 1) {
+            setAdditionalVendorValues(commonFields.additional_vendors, candidateRows[0].additional_vendor_ids || []);
+          }
+        };
+
+        const applyVariantAutofill = (rowEl, candidateRows, changedField) => {
+          if (!rowEl || !candidateRows.length) {
+            return;
+          }
+          const inputMap = getVariantInputMap(rowEl);
+          if (!inputMap) {
+            return;
+          }
+          if (changedField !== "colour") {
+            const value = uniqueValueForKey(candidateRows, "colour");
+            if (value && inputMap.colour) {
+              inputMap.colour.value = value;
+            }
+          }
+          if (changedField !== "colour_code") {
+            const value = uniqueValueForKey(candidateRows, "colour_code");
+            if (value && inputMap.colour_code) {
+              inputMap.colour_code.value = value;
+            }
+          }
+          if (changedField !== "pantone_number") {
+            const value = uniqueValueForKey(candidateRows, "pantone_number");
+            if (value && inputMap.pantone_number) {
+              inputMap.pantone_number.value = value;
+            }
+          }
+          if (changedField !== "code") {
+            const value = uniqueValueForKey(candidateRows, "code");
+            if (value && inputMap.code) {
+              inputMap.code.value = value;
+            }
+          }
+        };
+
+        const refresh = ({ activeRow = null, autofill = false, changedField = "" } = {}) => {
+          const { commonMatches, variantMatches } = computeMatches(activeRow);
+          updateDatalists(commonMatches, variantMatches);
+          if (!autofill) {
+            return;
+          }
+          const candidateRows = variantMatches.length ? variantMatches : commonMatches;
+          applyCommonAutofill(candidateRows, changedField);
+          applyVariantAutofill(activeRow, candidateRows, changedField);
+          const refreshed = computeMatches(activeRow);
+          updateDatalists(refreshed.commonMatches, refreshed.variantMatches);
+        };
+
+        const firstRow = () => rowsBody.querySelector("tr");
+
+        const attachCommonTextFieldHandlers = (fieldName, element) => {
+          if (!element) {
+            return;
+          }
+          element.addEventListener("input", () => {
+            activeCommonFilters.add(fieldName);
+            refresh({ activeRow: firstRow() });
+          });
+          element.addEventListener("change", () => {
+            activeCommonFilters.add(fieldName);
+            refresh({ activeRow: firstRow(), autofill: true, changedField: fieldName });
+          });
+        };
+
+        attachCommonTextFieldHandlers("name", commonFields.name);
+        attachCommonTextFieldHandlers("rm_id", commonFields.rm_id);
+        attachCommonTextFieldHandlers("cost_per_unit", commonFields.cost_per_unit);
+        attachCommonTextFieldHandlers("reorder_level", commonFields.reorder_level);
+
+        ["material_type", "unit", "vendor_id", "additional_vendors"].forEach((fieldName) => {
+          const element = commonFields[fieldName];
+          if (!element) {
+            return;
+          }
+          element.addEventListener("change", () => {
+            activeCommonFilters.add(fieldName);
+            refresh({ activeRow: firstRow(), autofill: true, changedField: fieldName });
+          });
+        });
+
+        const variantFieldNameMap = {
+          variant_colour: "colour",
+          variant_colour_code: "colour_code",
+          variant_pantone_number: "pantone_number",
+          variant_code: "code",
+          variant_opening_stock: "opening_stock",
+        };
+
+        rowsBody.addEventListener("input", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLInputElement)) {
+            return;
+          }
+          if (!variantFieldNameMap[target.name]) {
+            return;
+          }
+          const row = target.closest("tr");
+          if (!row) {
+            return;
+          }
+          refresh({ activeRow: row });
+        });
+
+        rowsBody.addEventListener("change", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLInputElement)) {
+            return;
+          }
+          const changedField = variantFieldNameMap[target.name];
+          if (!changedField) {
+            return;
+          }
+          const row = target.closest("tr");
+          if (!row) {
+            return;
+          }
+          refresh({ activeRow: row, autofill: true, changedField });
+        });
+
+        const modalEl = document.getElementById("createMaterialModal");
+        if (modalEl) {
+          modalEl.addEventListener("shown.bs.modal", () => {
+            refresh({ activeRow: firstRow() });
+          });
+        }
+
+        refresh({ activeRow: firstRow() });
       })();
     </script>
   {% endif %}

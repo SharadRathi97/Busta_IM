@@ -65,6 +65,50 @@ class RawMaterialCostTests(TestCase):
         self.assertContains(response, "vendor colour code")
         self.assertContains(response, "Pantone Number")
 
+    def test_raw_material_create_modal_includes_autofill_dataset(self):
+        self.client.force_login(self.user)
+        RawMaterial.objects.create(
+            name="AutoFill Canvas",
+            rm_id="RMID-AUTO-001",
+            code="RMID-AUTO-001-BLU",
+            material_type=RawMaterial.MaterialType.FABRIC,
+            colour="Blue",
+            colour_code="BLU",
+            unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("33.000"),
+            current_stock=Decimal("15.000"),
+            reorder_level=Decimal("4.000"),
+            vendor=self.vendor,
+        )
+
+        response = self.client.get(reverse("inventory:list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="materialAutofillRowsData"')
+        self.assertContains(response, '"rm_id": "RMID-AUTO-001"')
+
+    def test_raw_material_edit_page_includes_autofill_dataset(self):
+        self.client.force_login(self.user)
+        material = RawMaterial.objects.create(
+            name="AutoFill Edit Canvas",
+            rm_id="RMID-AUTO-EDIT-001",
+            code="RMID-AUTO-EDIT-001-BLK",
+            material_type=RawMaterial.MaterialType.FABRIC,
+            colour="Black",
+            colour_code="BLK",
+            unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("39.000"),
+            current_stock=Decimal("20.000"),
+            reorder_level=Decimal("5.000"),
+            vendor=self.vendor,
+        )
+
+        response = self.client.get(reverse("inventory:edit", args=[material.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="materialEditAutofillRowsData"')
+        self.assertContains(response, '"rm_id": "RMID-AUTO-EDIT-001"')
+
     def test_create_raw_material_without_code_defaults_to_rm_id_and_colour_code(self):
         self.client.force_login(self.user)
 
@@ -207,9 +251,9 @@ class RawMaterialCostTests(TestCase):
             ["BLU", "RED"],
         )
 
-    def test_create_material_rejects_duplicate_rm_id_and_colour_code_pair(self):
+    def test_create_material_same_code_and_colour_code_uses_weighted_average_cost(self):
         self.client.force_login(self.user)
-        RawMaterial.objects.create(
+        material = RawMaterial.objects.create(
             name="Existing Canvas",
             rm_id="RMID-CANVAS-002",
             code="RMID-CANVAS-002-BLU",
@@ -217,6 +261,7 @@ class RawMaterialCostTests(TestCase):
             colour="Blue",
             colour_code="BLU",
             unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("40.000"),
             current_stock=Decimal("10.000"),
             reorder_level=Decimal("2.000"),
             vendor=self.vendor,
@@ -236,16 +281,57 @@ class RawMaterialCostTests(TestCase):
                 "variant_colour": ["Blue"],
                 "variant_colour_code": ["BLU"],
                 "variant_pantone_number": [""],
-                "variant_code": [""],
+                "variant_code": ["RMID-CANVAS-002-BLU"],
+                "variant_opening_stock": ["5.000"],
+            },
+        )
+
+        self.assertRedirects(response, reverse("inventory:list"))
+        material.refresh_from_db()
+        self.assertEqual(RawMaterial.objects.filter(rm_id="RMID-CANVAS-002", colour_code="BLU").count(), 1)
+        self.assertEqual(material.cost_per_unit, Decimal("44.000"))
+        self.assertEqual(material.current_stock, Decimal("15.000"))
+        self.assertEqual(material.code, "RMID-CANVAS-002-BLU")
+
+    def test_create_material_rejects_duplicate_rm_id_and_colour_code_with_different_code(self):
+        self.client.force_login(self.user)
+        RawMaterial.objects.create(
+            name="Existing Canvas",
+            rm_id="RMID-CANVAS-004",
+            code="RMID-CANVAS-004-BLU",
+            material_type=RawMaterial.MaterialType.FABRIC,
+            colour="Blue",
+            colour_code="BLU",
+            unit=RawMaterial.Unit.METER,
+            current_stock=Decimal("10.000"),
+            reorder_level=Decimal("2.000"),
+            vendor=self.vendor,
+        )
+
+        response = self.client.post(
+            reverse("inventory:list"),
+            {
+                "action": "create_material",
+                "name": "New Canvas",
+                "rm_id": "RMID-CANVAS-004",
+                "material_type": RawMaterial.MaterialType.FABRIC,
+                "unit": RawMaterial.Unit.METER,
+                "cost_per_unit": "52.000",
+                "vendor": str(self.vendor.id),
+                "reorder_level": "5.000",
+                "variant_colour": ["Blue"],
+                "variant_colour_code": ["BLU"],
+                "variant_pantone_number": [""],
+                "variant_code": ["DIFF-CODE-001"],
                 "variant_opening_stock": ["5.000"],
             },
             follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "RM ID and Vendor Colour Code combination already exists")
+        self.assertContains(response, "RM ID and Vendor Colour Code combination already exists with a different material code")
         self.assertEqual(
-            RawMaterial.objects.filter(rm_id="RMID-CANVAS-002", colour_code="BLU").count(),
+            RawMaterial.objects.filter(rm_id="RMID-CANVAS-004", colour_code="BLU").count(),
             1,
         )
 

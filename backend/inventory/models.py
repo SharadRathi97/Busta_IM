@@ -204,6 +204,53 @@ def create_raw_material_with_opening_stock(
         raise ValueError("Material code could not be resolved.")
 
     with transaction.atomic():
+        existing_material = None
+        if resolved_colour_code:
+            existing_material = (
+                RawMaterial.objects.select_for_update()
+                .filter(code=resolved_code, colour_code=resolved_colour_code)
+                .order_by("id")
+                .first()
+            )
+
+        if existing_material:
+            if existing_material.unit != unit:
+                raise ValueError("Duplicate material with same code and vendor colour code must use the same unit.")
+
+            update_fields: list[str] = []
+            if opening_stock > 0:
+                existing_qty = existing_material.current_stock
+                incoming_qty = opening_stock
+                total_qty = existing_qty + incoming_qty
+                if total_qty > 0:
+                    weighted_cost = (
+                        (existing_material.cost_per_unit * existing_qty) + (cost_per_unit * incoming_qty)
+                    ) / total_qty
+                    existing_material.cost_per_unit = weighted_cost
+                    update_fields.append("cost_per_unit")
+
+                existing_material.current_stock = existing_material.current_stock + opening_stock
+                update_fields.append("current_stock")
+
+            if update_fields:
+                existing_material.save(update_fields=update_fields)
+            add_vendor_to_material(material=existing_material, vendor=vendor)
+            for extra_vendor in extra_vendors:
+                add_vendor_to_material(material=existing_material, vendor=extra_vendor)
+
+            if opening_stock > 0:
+                InventoryLedger.objects.create(
+                    material=existing_material,
+                    txn_type=InventoryLedger.TxnType.IN,
+                    quantity=opening_stock,
+                    unit=existing_material.unit,
+                    reason="Opening stock",
+                    reference_type="opening_stock",
+                    reference_id=existing_material.id,
+                    created_by=created_by,
+                )
+            return existing_material
+
         material = RawMaterial.objects.create(
             name=name,
             rm_id=resolved_rm_id,
