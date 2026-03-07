@@ -206,17 +206,30 @@ def create_raw_material_with_opening_stock(
     with transaction.atomic():
         existing_material = None
         if resolved_colour_code:
-            candidate_qs = (
+            candidate_materials = list(
                 RawMaterial.objects.select_for_update()
                 .filter(code__iexact=resolved_code, colour_code__iexact=resolved_colour_code)
                 .order_by("id")
             )
-            existing_material = (
-                candidate_qs.filter(Q(vendor_id=vendor.id) | Q(vendor_links__vendor_id=vendor.id))
-                .distinct()
-                .first()
-                or candidate_qs.first()
-            )
+            if candidate_materials:
+                existing_material = next(
+                    (candidate for candidate in candidate_materials if candidate.vendor_id == vendor.id),
+                    None,
+                )
+                if not existing_material:
+                    candidate_ids = [candidate.id for candidate in candidate_materials]
+                    linked_candidate_ids = set(
+                        RawMaterialVendor.objects.filter(
+                            material_id__in=candidate_ids,
+                            vendor_id=vendor.id,
+                        ).values_list("material_id", flat=True)
+                    )
+                    existing_material = next(
+                        (candidate for candidate in candidate_materials if candidate.id in linked_candidate_ids),
+                        None,
+                    )
+                if not existing_material:
+                    existing_material = candidate_materials[0]
 
         if existing_material:
             if existing_material.unit != unit:
