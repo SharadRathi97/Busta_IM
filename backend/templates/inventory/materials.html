@@ -22,7 +22,7 @@
     <input type="hidden" name="direction" value="{{ sort_direction }}">
     {% url 'inventory:list' as reset_inventory_url %}
     <div class="row g-2">
-      {% include "partials/search_field.html" with label="Search Raw Materials" value=filter_values.q placeholder="Search RM ID, material, code, colour code, supplier" %}
+      {% include "partials/search_field.html" with label="Search Raw Materials" value=filter_values.q placeholder="Search RM ID, material, code, vendor colour code, pantone, supplier" %}
       <div class="col-6 col-md-2">
         <label class="form-label mb-1">Material Type</label>
         <select name="material_type" class="form-select form-select-sm">
@@ -130,7 +130,8 @@
               <th><a class="sort-link {% if sort_state.code.active %}active{% endif %}" href="{% replace_query request sort='code' direction=sort_state.code.next page='' %}">Code {{ sort_state.code.icon }}</a></th>
               <th><a class="sort-link {% if sort_state.type.active %}active{% endif %}" href="{% replace_query request sort='type' direction=sort_state.type.next page='' %}">Type {{ sort_state.type.icon }}</a></th>
               <th><a class="sort-link {% if sort_state.colour.active %}active{% endif %}" href="{% replace_query request sort='colour' direction=sort_state.colour.next page='' %}">Colour {{ sort_state.colour.icon }}</a></th>
-              <th><a class="sort-link {% if sort_state.colour_code.active %}active{% endif %}" href="{% replace_query request sort='colour_code' direction=sort_state.colour_code.next page='' %}">Colour Code {{ sort_state.colour_code.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.colour_code.active %}active{% endif %}" href="{% replace_query request sort='colour_code' direction=sort_state.colour_code.next page='' %}">vendor colour code {{ sort_state.colour_code.icon }}</a></th>
+              <th><a class="sort-link {% if sort_state.pantone_number.active %}active{% endif %}" href="{% replace_query request sort='pantone_number' direction=sort_state.pantone_number.next page='' %}">Pantone Number {{ sort_state.pantone_number.icon }}</a></th>
               <th><a class="sort-link {% if sort_state.stock.active %}active{% endif %}" href="{% replace_query request sort='stock' direction=sort_state.stock.next page='' %}">Stock {{ sort_state.stock.icon }}</a></th>
               <th><a class="sort-link {% if sort_state.cost.active %}active{% endif %}" href="{% replace_query request sort='cost' direction=sort_state.cost.next page='' %}">Cost / Unit {{ sort_state.cost.icon }}</a></th>
               <th><a class="sort-link {% if sort_state.reorder.active %}active{% endif %}" href="{% replace_query request sort='reorder' direction=sort_state.reorder.next page='' %}">Reorder {{ sort_state.reorder.icon }}</a></th>
@@ -149,6 +150,7 @@
                 <td><span class="badge badge-soft">{{ material.get_material_type_display }}</span></td>
                 <td>{{ material.colour|default:"-" }}</td>
                 <td>{{ material.colour_code|default:"-" }}</td>
+                <td>{{ material.pantone_number|default:"-" }}</td>
                 <td>{{ material.current_stock }} {{ material.unit }}</td>
                 <td>{{ material.cost_per_unit|floatformat:3 }}</td>
                 <td>{{ material.reorder_level }}</td>
@@ -181,7 +183,7 @@
                 </td>
               </tr>
             {% empty %}
-              <tr><td colspan="13">No raw materials found.</td></tr>
+              <tr><td colspan="14">No raw materials found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -289,7 +291,8 @@
                     <thead>
                       <tr>
                         <th style="min-width: 180px;">Colour</th>
-                        <th style="min-width: 180px;">Colour Code</th>
+                        <th style="min-width: 180px;">Vendor Colour Code</th>
+                        <th style="min-width: 210px;">Pantone Number</th>
                         <th style="min-width: 210px;">Material Code (Optional)</th>
                         <th style="min-width: 160px;">Opening Stock</th>
                         <th style="width: 90px;">Row</th>
@@ -300,9 +303,10 @@
                 </div>
               </div>
               <div class="form-help mt-2">
-                Each colour row will be created as a separate stock line. Same RM ID is allowed across rows as long as Colour Code is different.
+                Each colour row will be created as a separate stock line. For every row, enter Vendor Colour Code or Pantone Number.
               </div>
               {% for error in create_form.colour_code.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              {% for error in create_form.pantone_number.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
               {% for error in create_form.code.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
               {% for error in create_form.opening_stock.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
             </div>
@@ -387,6 +391,7 @@
 
           const colourCell = document.createElement("td");
           const colourCodeCell = document.createElement("td");
+          const pantoneCell = document.createElement("td");
           const codeCell = document.createElement("td");
           const stockCell = document.createElement("td");
           const removeCell = document.createElement("td");
@@ -404,7 +409,13 @@
           colourCodeInput.className = "form-control form-control-sm";
           colourCodeInput.placeholder = "e.g. BLU";
           colourCodeInput.value = rowData.colour_code || "";
-          colourCodeInput.required = true;
+
+          const pantoneInput = document.createElement("input");
+          pantoneInput.type = "text";
+          pantoneInput.name = "variant_pantone_number";
+          pantoneInput.className = "form-control form-control-sm";
+          pantoneInput.placeholder = "e.g. PANTONE-286 C";
+          pantoneInput.value = rowData.pantone_number || "";
 
           const codeInput = document.createElement("input");
           codeInput.type = "text";
@@ -430,12 +441,14 @@
 
           colourCell.appendChild(colourInput);
           colourCodeCell.appendChild(colourCodeInput);
+          pantoneCell.appendChild(pantoneInput);
           codeCell.appendChild(codeInput);
           stockCell.appendChild(stockInput);
           removeCell.appendChild(removeBtn);
 
           row.appendChild(colourCell);
           row.appendChild(colourCodeCell);
+          row.appendChild(pantoneCell);
           row.appendChild(codeCell);
           row.appendChild(stockCell);
           row.appendChild(removeCell);

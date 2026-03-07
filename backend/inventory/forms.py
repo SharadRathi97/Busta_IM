@@ -14,7 +14,9 @@ class RawMaterialBaseForm(forms.Form):
     code = forms.CharField(
         max_length=50,
         required=False,
-        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "Optional; defaults to RM ID + Colour Code"}),
+        widget=forms.TextInput(
+            attrs={"class": "form-control", "placeholder": "Optional; defaults to RM ID + Vendor Colour Code/Pantone"}
+        ),
     )
     material_type = forms.ChoiceField(
         choices=RawMaterial.MaterialType.choices,
@@ -27,7 +29,15 @@ class RawMaterialBaseForm(forms.Form):
     )
     colour_code = forms.CharField(
         max_length=30,
-        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. RED / PANTONE-186"}),
+        required=False,
+        label="Vendor Colour Code",
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. RED"}),
+    )
+    pantone_number = forms.CharField(
+        max_length=50,
+        required=False,
+        label="Pantone Number",
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. PANTONE-186 C"}),
     )
     unit = forms.ChoiceField(choices=RawMaterial.Unit.choices, widget=forms.Select(attrs={"class": "form-select"}))
     cost_per_unit = forms.DecimalField(
@@ -58,7 +68,7 @@ class RawMaterialBaseForm(forms.Form):
         ).order_by("name")
         self.fields["vendor"].queryset = supplier_queryset
         self.fields["additional_vendors"].queryset = supplier_queryset
-        self.fields["code"].help_text = "Optional. If left blank, system uses RM ID + Colour Code."
+        self.fields["code"].help_text = "Optional. If left blank, system uses RM ID + Vendor Colour Code or Pantone Number."
 
     def clean_code(self):
         return (self.cleaned_data.get("code") or "").strip().upper()
@@ -82,30 +92,46 @@ class RawMaterialBaseForm(forms.Form):
     def clean_colour_code(self):
         return (self.cleaned_data.get("colour_code") or "").strip().upper()
 
+    def clean_pantone_number(self):
+        return (self.cleaned_data.get("pantone_number") or "").strip().upper()
+
     def clean(self):
         cleaned = super().clean()
         material_type = cleaned.get("material_type")
         colour = (cleaned.get("colour") or "").strip()
         colour_code = (cleaned.get("colour_code") or "").strip().upper()
+        pantone_number = (cleaned.get("pantone_number") or "").strip().upper()
         rm_id = (cleaned.get("rm_id") or "").strip().upper()
         code = (cleaned.get("code") or "").strip().upper()
         if material_type == RawMaterial.MaterialType.FABRIC and not colour:
             self.add_error("colour", "Colour is required when material type is Fabric.")
 
-        resolved_code = code or (f"{rm_id}-{colour_code}" if rm_id and colour_code else "")
+        if not colour_code and not pantone_number:
+            self.add_error("colour_code", "Enter Vendor Colour Code or Pantone Number.")
+            self.add_error("pantone_number", "Enter Vendor Colour Code or Pantone Number.")
+
+        variant_identifier = colour_code or pantone_number
+        resolved_code = code or (f"{rm_id}-{variant_identifier}" if rm_id and variant_identifier else "")
         if not resolved_code:
-            self.add_error("code", "Material code could not be resolved. Provide Code or valid RM ID + Colour Code.")
+            self.add_error(
+                "code",
+                "Material code could not be resolved. Provide Code or valid RM ID with Vendor Colour Code/Pantone Number.",
+            )
             return cleaned
 
-        duplicate_variant = RawMaterial.objects.filter(rm_id=rm_id, colour_code=colour_code)
+        duplicate_base = RawMaterial.objects.filter(rm_id=rm_id)
         if self.material:
-            duplicate_variant = duplicate_variant.exclude(pk=self.material.pk)
-        if duplicate_variant.exists():
-            self.add_error("colour_code", "This RM ID and Colour Code combination already exists.")
+            duplicate_base = duplicate_base.exclude(pk=self.material.pk)
+
+        if colour_code and duplicate_base.filter(colour_code=colour_code).exists():
+            self.add_error("colour_code", "This RM ID and Vendor Colour Code combination already exists.")
+        if pantone_number and duplicate_base.filter(pantone_number=pantone_number).exists():
+            self.add_error("pantone_number", "This RM ID and Pantone Number combination already exists.")
 
         cleaned["code"] = resolved_code
         cleaned["rm_id"] = rm_id
         cleaned["colour_code"] = colour_code
+        cleaned["pantone_number"] = pantone_number
         return cleaned
 
 

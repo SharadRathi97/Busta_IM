@@ -5,6 +5,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
+from django.db.models import Q
 
 from partners.models import Partner
 
@@ -30,7 +31,8 @@ class RawMaterial(models.Model):
     code = models.CharField(max_length=50)
     material_type = models.CharField(max_length=32, choices=MaterialType.choices, default=MaterialType.OTHER)
     colour = models.CharField(max_length=80, blank=True)
-    colour_code = models.CharField(max_length=30)
+    colour_code = models.CharField(max_length=30, blank=True, default="")
+    pantone_number = models.CharField(max_length=50, blank=True, default="")
     unit = models.CharField(max_length=16, choices=Unit.choices)
     cost_per_unit = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     current_stock = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
@@ -41,9 +43,19 @@ class RawMaterial(models.Model):
     class Meta:
         ordering = ["name"]
         constraints = [
+            models.CheckConstraint(
+                check=(~Q(colour_code="") | ~Q(pantone_number="")),
+                name="raw_material_vendor_or_pantone_required",
+            ),
             models.UniqueConstraint(
                 fields=["rm_id", "colour_code"],
-                name="uniq_raw_material_rm_id_colour_code",
+                condition=~Q(colour_code=""),
+                name="uniq_raw_material_rm_id_vendor_colour_code",
+            ),
+            models.UniqueConstraint(
+                fields=["rm_id", "pantone_number"],
+                condition=~Q(pantone_number=""),
+                name="uniq_raw_material_rm_id_pantone_number",
             )
         ]
 
@@ -160,6 +172,7 @@ def create_raw_material_with_opening_stock(
     material_type: str,
     colour: str,
     colour_code: str,
+    pantone_number: str,
     unit: str,
     cost_per_unit: Decimal,
     vendor: Partner,
@@ -178,13 +191,15 @@ def create_raw_material_with_opening_stock(
 
     resolved_rm_id = rm_id.strip().upper()
     resolved_colour_code = colour_code.strip().upper()
+    resolved_pantone_number = pantone_number.strip().upper()
+    resolved_variant_identifier = resolved_colour_code or resolved_pantone_number
     resolved_code = code.strip().upper() or (
-        f"{resolved_rm_id}-{resolved_colour_code}" if resolved_rm_id and resolved_colour_code else ""
+        f"{resolved_rm_id}-{resolved_variant_identifier}" if resolved_rm_id and resolved_variant_identifier else ""
     )
     if not resolved_rm_id:
         raise ValueError("RM ID is required.")
-    if not resolved_colour_code:
-        raise ValueError("Colour code is required.")
+    if not resolved_variant_identifier:
+        raise ValueError("Either Vendor Colour Code or Pantone Number is required.")
     if not resolved_code:
         raise ValueError("Material code could not be resolved.")
 
@@ -196,6 +211,7 @@ def create_raw_material_with_opening_stock(
             material_type=material_type,
             colour=colour.strip(),
             colour_code=resolved_colour_code,
+            pantone_number=resolved_pantone_number,
             unit=unit,
             cost_per_unit=cost_per_unit,
             vendor=vendor,
@@ -235,6 +251,7 @@ def update_raw_material_details(
     material_type: str,
     colour: str,
     colour_code: str,
+    pantone_number: str,
     unit: str,
     cost_per_unit: Decimal,
     vendor: Partner,
@@ -251,13 +268,15 @@ def update_raw_material_details(
 
     resolved_rm_id = rm_id.strip().upper()
     resolved_colour_code = colour_code.strip().upper()
+    resolved_pantone_number = pantone_number.strip().upper()
+    resolved_variant_identifier = resolved_colour_code or resolved_pantone_number
     resolved_code = code.strip().upper() or (
-        f"{resolved_rm_id}-{resolved_colour_code}" if resolved_rm_id and resolved_colour_code else ""
+        f"{resolved_rm_id}-{resolved_variant_identifier}" if resolved_rm_id and resolved_variant_identifier else ""
     )
     if not resolved_rm_id:
         raise ValueError("RM ID is required.")
-    if not resolved_colour_code:
-        raise ValueError("Colour code is required.")
+    if not resolved_variant_identifier:
+        raise ValueError("Either Vendor Colour Code or Pantone Number is required.")
     if not resolved_code:
         raise ValueError("Material code could not be resolved.")
 
@@ -272,6 +291,7 @@ def update_raw_material_details(
         locked.material_type = material_type
         locked.colour = colour.strip()
         locked.colour_code = resolved_colour_code
+        locked.pantone_number = resolved_pantone_number
         locked.unit = unit
         locked.cost_per_unit = cost_per_unit
         locked.vendor = vendor
@@ -284,6 +304,7 @@ def update_raw_material_details(
                 "material_type",
                 "colour",
                 "colour_code",
+                "pantone_number",
                 "unit",
                 "cost_per_unit",
                 "vendor",

@@ -55,6 +55,7 @@ def _get_sorting(sort_key: str, direction: str):
         "type": "material_type",
         "colour": "colour",
         "colour_code": "colour_code",
+        "pantone_number": "pantone_number",
         "stock": "current_stock",
         "cost": "cost_per_unit",
         "reorder": "reorder_level",
@@ -79,6 +80,7 @@ def _build_sort_state(active_sort: str, active_direction: str):
         "type",
         "colour",
         "colour_code",
+        "pantone_number",
         "stock",
         "cost",
         "reorder",
@@ -149,6 +151,7 @@ RAW_MATERIAL_CSV_COLUMNS = [
     "material_type",
     "colour",
     "colour_code",
+    "pantone_number",
     "unit",
     "cost_per_unit",
     "vendor_gst_number",
@@ -198,22 +201,31 @@ def _parse_additional_vendor_gst_numbers(raw_value: str) -> list[str]:
 def _extract_material_variant_rows(payload) -> list[dict[str, str]]:
     colour_values = payload.getlist("variant_colour")
     colour_code_values = payload.getlist("variant_colour_code")
+    pantone_values = payload.getlist("variant_pantone_number")
     code_values = payload.getlist("variant_code")
     opening_stock_values = payload.getlist("variant_opening_stock")
 
-    row_count = max(len(colour_values), len(colour_code_values), len(code_values), len(opening_stock_values))
+    row_count = max(
+        len(colour_values),
+        len(colour_code_values),
+        len(pantone_values),
+        len(code_values),
+        len(opening_stock_values),
+    )
     rows: list[dict[str, str]] = []
     for index in range(row_count):
         colour = (colour_values[index] if index < len(colour_values) else "").strip()
         colour_code = (colour_code_values[index] if index < len(colour_code_values) else "").strip()
+        pantone_number = (pantone_values[index] if index < len(pantone_values) else "").strip()
         code = (code_values[index] if index < len(code_values) else "").strip()
         opening_stock = (opening_stock_values[index] if index < len(opening_stock_values) else "").strip()
-        if not colour and not colour_code and not code and not opening_stock:
+        if not colour and not colour_code and not pantone_number and not code and not opening_stock:
             continue
         rows.append(
             {
                 "colour": colour,
                 "colour_code": colour_code,
+                "pantone_number": pantone_number,
                 "code": code,
                 "opening_stock": opening_stock,
             }
@@ -247,7 +259,8 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
 
     payloads: list[dict] = []
     errors: list[str] = []
-    seen_variant_rows: dict[tuple[str, str], int] = {}
+    seen_vendor_colour_rows: dict[tuple[str, str], int] = {}
+    seen_pantone_rows: dict[tuple[str, str], int] = {}
 
     for row_number, row in enumerate(rows, start=2):
         vendor = _resolve_supplier_by_gst(row.get("vendor_gst_number", ""))
@@ -277,6 +290,7 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
             "material_type": row.get("material_type", ""),
             "colour": row.get("colour", ""),
             "colour_code": row.get("colour_code", ""),
+            "pantone_number": row.get("pantone_number", ""),
             "unit": row.get("unit", ""),
             "cost_per_unit": row.get("cost_per_unit", ""),
             "vendor": str(vendor.id),
@@ -295,17 +309,27 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
             errors.append(f"Row {row_number}: {'; '.join(row_errors)}")
             continue
 
-        variant_key = (
-            form.cleaned_data["rm_id"],
-            form.cleaned_data["colour_code"],
-        )
-        previous_row = seen_variant_rows.get(variant_key)
-        if previous_row:
-            errors.append(
-                f"Row {row_number}: duplicate RM ID + Colour Code in this CSV (already in row {previous_row})."
-            )
-            continue
-        seen_variant_rows[variant_key] = row_number
+        rm_id = form.cleaned_data["rm_id"]
+        vendor_colour_code = form.cleaned_data["colour_code"]
+        pantone_number = form.cleaned_data["pantone_number"]
+        if vendor_colour_code:
+            vendor_colour_key = (rm_id, vendor_colour_code)
+            previous_row = seen_vendor_colour_rows.get(vendor_colour_key)
+            if previous_row:
+                errors.append(
+                    f"Row {row_number}: duplicate RM ID + Vendor Colour Code in this CSV (already in row {previous_row})."
+                )
+                continue
+            seen_vendor_colour_rows[vendor_colour_key] = row_number
+        if pantone_number:
+            pantone_key = (rm_id, pantone_number)
+            previous_row = seen_pantone_rows.get(pantone_key)
+            if previous_row:
+                errors.append(
+                    f"Row {row_number}: duplicate RM ID + Pantone Number in this CSV (already in row {previous_row})."
+                )
+                continue
+            seen_pantone_rows[pantone_key] = row_number
 
         payloads.append(
             {
@@ -315,6 +339,7 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
                 "material_type": form.cleaned_data["material_type"],
                 "colour": form.cleaned_data["colour"],
                 "colour_code": form.cleaned_data["colour_code"],
+                "pantone_number": form.cleaned_data["pantone_number"],
                 "unit": form.cleaned_data["unit"],
                 "cost_per_unit": form.cleaned_data["cost_per_unit"],
                 "vendor": vendor,
@@ -337,6 +362,7 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
                     material_type=payload["material_type"],
                     colour=payload["colour"],
                     colour_code=payload["colour_code"],
+                    pantone_number=payload["pantone_number"],
                     unit=payload["unit"],
                     cost_per_unit=payload["cost_per_unit"],
                     vendor=payload["vendor"],
@@ -346,7 +372,9 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
                     created_by=created_by,
                 )
     except IntegrityError as exc:
-        raise ValidationError("Duplicate raw material entry detected. RM ID + Colour Code must be unique.") from exc
+        raise ValidationError(
+            "Duplicate raw material entry detected. RM ID + Vendor Colour Code or RM ID + Pantone Number must be unique."
+        ) from exc
     return len(payloads)
 
 
@@ -368,6 +396,7 @@ def raw_material_csv_template(request):
             "fabric",
             "Blue",
             "BLU",
+            "PANTONE-286 C",
             "m",
             "55.000",
             "29ABCDE1234F1Z5",
@@ -392,7 +421,7 @@ def material_list(request):
     action = request.POST.get("action") if request.method == "POST" else None
     create_form = RawMaterialCreateForm(request.POST if action in {None, "create_material"} else None)
     csv_form = RawMaterialCSVUploadForm(request.POST if action == "upload_csv" else None, request.FILES if action == "upload_csv" else None)
-    variant_rows_seed = [{"colour": "", "colour_code": "", "code": "", "opening_stock": ""}]
+    variant_rows_seed = [{"colour": "", "colour_code": "", "pantone_number": "", "code": "", "opening_stock": ""}]
     show_create_modal = False
     show_csv_modal = False
 
@@ -428,6 +457,7 @@ def material_list(request):
                             **common_values,
                             "colour": variant["colour"],
                             "colour_code": variant["colour_code"],
+                            "pantone_number": variant["pantone_number"],
                             "code": variant["code"],
                             "opening_stock": variant["opening_stock"],
                         }
@@ -445,19 +475,34 @@ def material_list(request):
                     row_errors.append(f"Row {row_index}: {'; '.join(errors_for_row)}")
 
                 if not row_errors:
-                    seen_variant_rows: dict[tuple[str, str], int] = {}
+                    seen_vendor_colour_rows: dict[tuple[str, str], int] = {}
+                    seen_pantone_rows: dict[tuple[str, str], int] = {}
                     for row_index, row_form in enumerate(row_forms, start=1):
-                        variant_key = (
-                            row_form.cleaned_data["rm_id"],
-                            row_form.cleaned_data["colour_code"],
-                        )
-                        previous_variant_row = seen_variant_rows.get(variant_key)
-                        if previous_variant_row:
-                            row_errors.append(
-                                f"Row {row_index}: Duplicate RM ID + Colour Code in submission (already in row {previous_variant_row})."
-                            )
-                        else:
-                            seen_variant_rows[variant_key] = row_index
+                        rm_id = row_form.cleaned_data["rm_id"]
+                        colour_code = row_form.cleaned_data["colour_code"]
+                        pantone_number = row_form.cleaned_data["pantone_number"]
+                        if colour_code:
+                            vendor_colour_key = (rm_id, colour_code)
+                            previous_vendor_colour_row = seen_vendor_colour_rows.get(vendor_colour_key)
+                            if previous_vendor_colour_row:
+                                row_errors.append(
+                                    "Row "
+                                    f"{row_index}: Duplicate RM ID + Vendor Colour Code in submission "
+                                    f"(already in row {previous_vendor_colour_row})."
+                                )
+                            else:
+                                seen_vendor_colour_rows[vendor_colour_key] = row_index
+                        if pantone_number:
+                            pantone_key = (rm_id, pantone_number)
+                            previous_pantone_row = seen_pantone_rows.get(pantone_key)
+                            if previous_pantone_row:
+                                row_errors.append(
+                                    "Row "
+                                    f"{row_index}: Duplicate RM ID + Pantone Number in submission "
+                                    f"(already in row {previous_pantone_row})."
+                                )
+                            else:
+                                seen_pantone_rows[pantone_key] = row_index
 
                 if row_errors:
                     for row_error in row_errors[:8]:
@@ -476,6 +521,7 @@ def material_list(request):
                                     material_type=row_form.cleaned_data["material_type"],
                                     colour=row_form.cleaned_data["colour"],
                                     colour_code=row_form.cleaned_data["colour_code"],
+                                    pantone_number=row_form.cleaned_data["pantone_number"],
                                     unit=row_form.cleaned_data["unit"],
                                     cost_per_unit=row_form.cleaned_data["cost_per_unit"],
                                     vendor=row_form.cleaned_data["vendor"],
@@ -492,7 +538,7 @@ def material_list(request):
                     except IntegrityError:
                         messages.error(
                             request,
-                            "Duplicate raw material entry detected. RM ID + Colour Code must be unique for each row.",
+                            "Duplicate raw material entry detected. RM ID + Vendor Colour Code or RM ID + Pantone Number must be unique.",
                         )
                         show_create_modal = True
             else:
@@ -505,6 +551,7 @@ def material_list(request):
                             material_type=create_form.cleaned_data["material_type"],
                             colour=create_form.cleaned_data["colour"],
                             colour_code=create_form.cleaned_data["colour_code"],
+                            pantone_number=create_form.cleaned_data["pantone_number"],
                             unit=create_form.cleaned_data["unit"],
                             cost_per_unit=create_form.cleaned_data["cost_per_unit"],
                             vendor=create_form.cleaned_data["vendor"],
@@ -555,6 +602,7 @@ def material_list(request):
             | Q(code__icontains=q_filter)
             | Q(colour__icontains=q_filter)
             | Q(colour_code__icontains=q_filter)
+            | Q(pantone_number__icontains=q_filter)
             | Q(vendor__name__icontains=q_filter)
             | Q(vendor_links__vendor__name__icontains=q_filter)
         ).distinct()
@@ -644,6 +692,7 @@ def material_edit(request, material_id: int):
         "material_type": material.material_type,
         "colour": material.colour,
         "colour_code": material.colour_code,
+        "pantone_number": material.pantone_number,
         "unit": material.unit,
         "cost_per_unit": material.cost_per_unit,
         "vendor": material.vendor_id,
@@ -662,6 +711,7 @@ def material_edit(request, material_id: int):
                 material_type=form.cleaned_data["material_type"],
                 colour=form.cleaned_data["colour"],
                 colour_code=form.cleaned_data["colour_code"],
+                pantone_number=form.cleaned_data["pantone_number"],
                 unit=form.cleaned_data["unit"],
                 cost_per_unit=form.cleaned_data["cost_per_unit"],
                 vendor=form.cleaned_data["vendor"],
