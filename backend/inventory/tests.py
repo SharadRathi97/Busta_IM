@@ -480,6 +480,48 @@ class RawMaterialCostTests(TestCase):
             "New supplier should be linked automatically to the existing material.",
         )
 
+    def test_create_material_same_code_and_colour_code_but_different_rm_id_creates_new_row(self):
+        self.client.force_login(self.user)
+        RawMaterial.objects.create(
+            name="Silicone Label - Air Mesh",
+            rm_id="LABEL-AM",
+            code="6406",
+            material_type=RawMaterial.MaterialType.ACCESSORY,
+            colour="Vallarta + Lemon",
+            colour_code="VAL+LEM",
+            unit=RawMaterial.Unit.PIECES,
+            cost_per_unit=Decimal("5.000"),
+            current_stock=Decimal("100.000"),
+            reorder_level=Decimal("10.000"),
+            vendor=self.vendor,
+        )
+
+        response = self.client.post(
+            reverse("inventory:list"),
+            {
+                "action": "create_material",
+                "name": "Silicone Label - CARRIMATE",
+                "rm_id": "LABEL-CARRIMATE",
+                "material_type": RawMaterial.MaterialType.ACCESSORY,
+                "unit": RawMaterial.Unit.PIECES,
+                "cost_per_unit": "6.000",
+                "vendor": str(self.vendor.id),
+                "reorder_level": "10.000",
+                "variant_colour": ["Vallarta + Lemon"],
+                "variant_colour_code": ["VAL+LEM"],
+                "variant_pantone_number": [""],
+                "variant_code": ["6406"],
+                "variant_opening_stock": ["25.000"],
+            },
+        )
+
+        self.assertRedirects(response, reverse("inventory:list"))
+        self.assertEqual(RawMaterial.objects.filter(code="6406", colour_code="VAL+LEM").count(), 2)
+        first = RawMaterial.objects.get(rm_id="LABEL-AM", colour_code="VAL+LEM")
+        second = RawMaterial.objects.get(rm_id="LABEL-CARRIMATE", colour_code="VAL+LEM")
+        self.assertEqual(first.current_stock, Decimal("100.000"))
+        self.assertEqual(second.current_stock, Decimal("25.000"))
+
     def test_create_material_rejects_duplicate_rm_id_and_colour_code_in_same_submit(self):
         self.client.force_login(self.user)
 

@@ -208,7 +208,11 @@ def create_raw_material_with_opening_stock(
         if resolved_colour_code:
             candidate_materials = list(
                 RawMaterial.objects.select_for_update()
-                .filter(code__iexact=resolved_code, colour_code__iexact=resolved_colour_code)
+                .filter(
+                    rm_id__iexact=resolved_rm_id,
+                    code__iexact=resolved_code,
+                    colour_code__iexact=resolved_colour_code,
+                )
                 .order_by("id")
             )
             if candidate_materials:
