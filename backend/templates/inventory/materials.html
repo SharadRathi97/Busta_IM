@@ -643,8 +643,14 @@
           if (criteria.reorder_level && !normalize(row.reorder_level).includes(criteria.reorder_level)) {
             return false;
           }
-          if (criteria.vendor_id && normalize(row.vendor_id) !== criteria.vendor_id) {
-            return false;
+          if (criteria.vendor_id) {
+            const supplierIds = new Set([
+              normalize(String(row.vendor_id || "")),
+              ...((row.additional_vendor_ids || []).map((value) => normalize(String(value)))),
+            ]);
+            if (!supplierIds.has(criteria.vendor_id)) {
+              return false;
+            }
           }
           if (criteria.additional_vendor_ids.length) {
             const additionalVendorSet = new Set(

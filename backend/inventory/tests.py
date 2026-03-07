@@ -376,6 +376,110 @@ class RawMaterialCostTests(TestCase):
         self.assertEqual(material.current_stock, Decimal("15.000"))
         self.assertEqual(material.cost_per_unit, Decimal("43.333"))
 
+    def test_create_material_merges_when_selected_supplier_is_existing_additional_supplier(self):
+        self.client.force_login(self.user)
+        additional_supplier = Partner.objects.create(
+            name="Additional Supplier",
+            partner_type=Partner.PartnerType.SUPPLIER,
+            gst_number="29ABCDE5678F2Z5",
+            address_line1="Supplier Lane",
+            city="Bengaluru",
+            state="Karnataka",
+            pincode="560012",
+        )
+        material = RawMaterial.objects.create(
+            name="Supplier Merge Canvas",
+            rm_id="RMID-SUP-MERGE-001",
+            code="RMID-SUP-MERGE-001-BLK",
+            material_type=RawMaterial.MaterialType.FABRIC,
+            colour="Black",
+            colour_code="BLK",
+            unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("20.000"),
+            current_stock=Decimal("10.000"),
+            reorder_level=Decimal("2.000"),
+            vendor=self.vendor,
+        )
+        RawMaterialVendor.objects.create(material=material, vendor=self.vendor)
+        RawMaterialVendor.objects.create(material=material, vendor=additional_supplier)
+
+        response = self.client.post(
+            reverse("inventory:list"),
+            {
+                "action": "create_material",
+                "name": "Supplier Merge Canvas",
+                "rm_id": "RMID-SUP-MERGE-001",
+                "material_type": RawMaterial.MaterialType.FABRIC,
+                "unit": RawMaterial.Unit.METER,
+                "cost_per_unit": "30.000",
+                "vendor": str(additional_supplier.id),
+                "reorder_level": "5.000",
+                "variant_colour": ["Black"],
+                "variant_colour_code": ["BLK"],
+                "variant_pantone_number": [""],
+                "variant_code": ["RMID-SUP-MERGE-001-BLK"],
+                "variant_opening_stock": ["5.000"],
+            },
+        )
+
+        self.assertRedirects(response, reverse("inventory:list"))
+        material.refresh_from_db()
+        self.assertEqual(RawMaterial.objects.filter(rm_id="RMID-SUP-MERGE-001", colour_code="BLK").count(), 1)
+        self.assertEqual(material.current_stock, Decimal("15.000"))
+
+    def test_create_material_merges_and_links_new_supplier(self):
+        self.client.force_login(self.user)
+        new_supplier = Partner.objects.create(
+            name="New Supplier",
+            partner_type=Partner.PartnerType.SUPPLIER,
+            gst_number="29ABCDE5678F3Z5",
+            address_line1="Supplier Street",
+            city="Bengaluru",
+            state="Karnataka",
+            pincode="560013",
+        )
+        material = RawMaterial.objects.create(
+            name="Supplier Link Canvas",
+            rm_id="RMID-SUP-LINK-001",
+            code="RMID-SUP-LINK-001-BLU",
+            material_type=RawMaterial.MaterialType.FABRIC,
+            colour="Blue",
+            colour_code="BLU",
+            unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("25.000"),
+            current_stock=Decimal("8.000"),
+            reorder_level=Decimal("2.000"),
+            vendor=self.vendor,
+        )
+        RawMaterialVendor.objects.create(material=material, vendor=self.vendor)
+
+        response = self.client.post(
+            reverse("inventory:list"),
+            {
+                "action": "create_material",
+                "name": "Supplier Link Canvas",
+                "rm_id": "RMID-SUP-LINK-001",
+                "material_type": RawMaterial.MaterialType.FABRIC,
+                "unit": RawMaterial.Unit.METER,
+                "cost_per_unit": "35.000",
+                "vendor": str(new_supplier.id),
+                "reorder_level": "5.000",
+                "variant_colour": ["Blue"],
+                "variant_colour_code": ["BLU"],
+                "variant_pantone_number": [""],
+                "variant_code": ["RMID-SUP-LINK-001-BLU"],
+                "variant_opening_stock": ["4.000"],
+            },
+        )
+
+        self.assertRedirects(response, reverse("inventory:list"))
+        material.refresh_from_db()
+        self.assertEqual(RawMaterial.objects.filter(rm_id="RMID-SUP-LINK-001", colour_code="BLU").count(), 1)
+        self.assertTrue(
+            RawMaterialVendor.objects.filter(material=material, vendor=new_supplier).exists(),
+            "New supplier should be linked automatically to the existing material.",
+        )
+
     def test_create_material_rejects_duplicate_rm_id_and_colour_code_in_same_submit(self):
         self.client.force_login(self.user)
 

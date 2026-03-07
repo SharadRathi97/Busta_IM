@@ -206,11 +206,16 @@ def create_raw_material_with_opening_stock(
     with transaction.atomic():
         existing_material = None
         if resolved_colour_code:
-            existing_material = (
+            candidate_qs = (
                 RawMaterial.objects.select_for_update()
                 .filter(code__iexact=resolved_code, colour_code__iexact=resolved_colour_code)
                 .order_by("id")
+            )
+            existing_material = (
+                candidate_qs.filter(Q(vendor_id=vendor.id) | Q(vendor_links__vendor_id=vendor.id))
+                .distinct()
                 .first()
+                or candidate_qs.first()
             )
 
         if existing_material:
