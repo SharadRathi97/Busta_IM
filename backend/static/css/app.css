@@ -261,6 +261,13 @@ canvas {
 .modal .modal-dialog {
   margin: 0.75rem auto;
   max-width: calc(100vw - 1.5rem);
+  min-height: calc(100% - 1.5rem);
+  display: flex;
+  align-items: stretch;
+}
+
+.modal .modal-dialog.modal-dialog-centered {
+  align-items: center;
 }
 
 .modal-dialog.modal-lg {
@@ -273,10 +280,45 @@ canvas {
 
 .modal-content {
   max-width: 100%;
+  max-height: calc(100vh - 1.5rem);
+  max-height: calc(100dvh - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.modal-body {
+.modal-content > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+}
+
+.modal-content > .modal-header,
+.modal-content > .modal-footer,
+.modal-content > form .modal-header,
+.modal-content > form .modal-footer {
+  flex: 0 0 auto;
+}
+
+.modal-content > .modal-body,
+.modal-content > form .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-content > .modal-footer,
+.modal-content > form .modal-footer {
+  flex: 0 0 auto;
+}
+
+.modal-body > .table-responsive {
+  max-width: 100%;
 }
 
 .modal .table-responsive > .table {
