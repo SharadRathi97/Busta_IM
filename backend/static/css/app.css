@@ -9,6 +9,14 @@ body {
   min-height: 100vh;
 }
 
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
 .app-container {
   max-width: 1400px;
 }
@@ -60,6 +68,11 @@ body {
 .table td,
 .table th {
   vertical-align: middle;
+}
+
+.table-responsive {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .table-tools {
@@ -208,6 +221,15 @@ body {
   flex-wrap: wrap;
 }
 
+.inline-form .form-control,
+.inline-form .form-select {
+  min-width: 0;
+}
+
+.inline-form .btn {
+  white-space: nowrap;
+}
+
 .row-actions {
   display: flex;
   align-items: center;
@@ -228,11 +250,41 @@ body {
 .completion-inputs {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.35rem;
 }
 
 .completion-inputs .form-control {
   min-width: 110px;
+}
+
+.modal .modal-dialog {
+  margin: 0.75rem auto;
+  max-width: calc(100vw - 1.5rem);
+}
+
+.modal-dialog.modal-lg {
+  max-width: min(800px, calc(100vw - 1.5rem));
+}
+
+.modal-dialog.modal-xl {
+  max-width: min(1140px, calc(100vw - 1.5rem));
+}
+
+.modal-content {
+  max-width: 100%;
+}
+
+.modal-body {
+  overflow-x: auto;
+}
+
+.modal .table-responsive > .table {
+  min-width: 560px;
+}
+
+.modal-title {
+  word-break: break-word;
 }
 
 @media (max-width: 768px) {
@@ -245,14 +297,64 @@ body {
   .filters-sticky {
     position: static;
   }
+
+  .table-tools {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .po-line-item {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 575.98px) {
+  .app-container {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
   .login-wrap {
     padding-top: 4.25rem;
   }
 
   .login-brand-logo {
     height: 44px;
+  }
+
+  .inline-form {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .inline-form .form-control,
+  .inline-form .form-select,
+  .inline-form .btn {
+    width: 100%;
+  }
+
+  .row-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .row-actions .btn,
+  .row-actions form {
+    width: 100%;
+  }
+
+  .completion-inputs .form-control {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .modal .modal-footer {
+    gap: 0.5rem;
+  }
+
+  .modal .modal-footer .btn {
+    width: 100%;
   }
 }
