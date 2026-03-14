@@ -209,7 +209,6 @@ def _find_existing_raw_material_for_variant(
         .filter(rm_id__iexact=rm_id)
         .filter(variant_filters)
         .order_by("id")
-        .distinct()
     )
     if not candidate_materials:
         return None
