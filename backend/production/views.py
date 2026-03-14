@@ -29,6 +29,7 @@ from .forms import (
     FinishedProductForm,
     ProductionOrderCreateForm,
     ProductionStatusForm,
+    build_bom_component_catalog,
     build_bom_component_choices,
 )
 from .models import (
@@ -428,14 +429,10 @@ def product_bom_page(request):
         }
         for product in catalog_items
     ]
-    product_component_map: dict[str, list[dict[str, str]]] = {}
+    product_component_map: dict[str, list[dict[str, object]]] = {}
     for product in catalog_items:
-        component_choices = build_bom_component_choices(target_product=product)
-        product.available_bom_components = component_choices
-        product_component_map[str(product.id)] = [
-            {"value": value, "label": label}
-            for value, label in component_choices
-        ]
+        product.available_bom_components = build_bom_component_choices(target_product=product)
+        product_component_map[str(product.id)] = build_bom_component_catalog(target_product=product)
         for bom_item in product.bom_items.all():
             bom_item.edit_component_choices = build_bom_component_choices(
                 target_product=product,

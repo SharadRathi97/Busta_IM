@@ -434,14 +434,89 @@ class ProductBOMActionTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
         product_component_map = response.context["product_component_map"]
-        first_product_components = {item["value"] for item in product_component_map[str(self.product.id)]}
-        second_product_components = {item["value"] for item in product_component_map[str(self.product_two.id)]}
+        first_product_components = product_component_map[str(self.product.id)]
+        second_product_components = product_component_map[str(self.product_two.id)]
 
-        self.assertNotIn(f"raw:{self.material_a.id}", first_product_components)
-        self.assertIn(f"raw:{self.material_b.id}", first_product_components)
-        self.assertIn(f"raw:{self.material_c.id}", first_product_components)
-        self.assertIn(f"raw:{self.material_a.id}", second_product_components)
-        self.assertIn(f"part:{self.part.id}", first_product_components)
+        def available_component_values(options):
+            values: set[str] = set()
+            for option in options:
+                if option["kind"] == "raw_material":
+                    values.update(variant["value"] for variant in option["variants"])
+                else:
+                    values.add(option["value"])
+            return values
+
+        first_component_values = available_component_values(first_product_components)
+        second_component_values = available_component_values(second_product_components)
+
+        self.assertNotIn(f"raw:{self.material_a.id}", first_component_values)
+        self.assertIn(f"raw:{self.material_b.id}", first_component_values)
+        self.assertIn(f"raw:{self.material_c.id}", first_component_values)
+        self.assertIn(f"raw:{self.material_a.id}", second_component_values)
+        self.assertIn(f"part:{self.part.id}", first_component_values)
+
+    def test_products_page_groups_raw_material_variants_under_one_component_option(self):
+        material_blue = RawMaterial.objects.create(
+            name="Webbing Tape",
+            rm_id="RMID-WEB-100",
+            code="RM-WEB-100-BLU",
+            colour="Blue",
+            colour_code="BLU",
+            unit=RawMaterial.Unit.METER,
+            current_stock=Decimal("20.000"),
+            reorder_level=Decimal("2.000"),
+            vendor=self.vendor,
+        )
+        material_black = RawMaterial.objects.create(
+            name="Webbing Tape",
+            rm_id="RMID-WEB-100",
+            code="RM-WEB-100-BLK",
+            colour="Black",
+            colour_code="BLK",
+            unit=RawMaterial.Unit.METER,
+            current_stock=Decimal("18.000"),
+            reorder_level=Decimal("2.000"),
+            vendor=self.vendor,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("production:products"))
+
+        self.assertEqual(response.status_code, 200)
+        product_components = response.context["product_component_map"][str(self.product.id)]
+        grouped_option = next(
+            option
+            for option in product_components
+            if option["kind"] == "raw_material" and option["label"] == "Raw Material - Webbing Tape (RMID-WEB-100)"
+        )
+        self.assertEqual(
+            {variant["value"] for variant in grouped_option["variants"]},
+            {f"raw:{material_blue.id}", f"raw:{material_black.id}"},
+        )
+        self.assertEqual(
+            {variant["label"] for variant in grouped_option["variants"]},
+            {"Blue / BLU", "Black / BLK"},
+        )
+
+    def test_bom_item_component_name_includes_material_variant(self):
+        material = RawMaterial.objects.create(
+            name="Panel Fabric",
+            rm_id="RMID-PANEL-001",
+            code="RM-PANEL-001-BLU",
+            colour="Blue",
+            colour_code="BLU",
+            unit=RawMaterial.Unit.METER,
+            current_stock=Decimal("25.000"),
+            reorder_level=Decimal("3.000"),
+            vendor=self.vendor,
+        )
+        bom_item = BOMItem.objects.create(
+            product=self.product_two,
+            material=material,
+            qty_per_unit=Decimal("1.000"),
+        )
+
+        self.assertEqual(bom_item.component_name, "Panel Fabric (Blue / BLU)")
 
     def test_bulk_add_bom_allows_part_component_for_finished_product(self):
         self.client.force_login(self.user)

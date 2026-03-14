@@ -236,6 +236,7 @@
                     <tr>
                       <th style="min-width: 280px;">Target (Finished Product / Part)</th>
                       <th style="min-width: 320px;">Component (Raw Material / Part)</th>
+                      <th style="min-width: 220px;">RM Colour</th>
                       <th style="min-width: 160px;">Qty / Unit</th>
                       <th style="width: 80px;">Row</th>
                     </tr>
@@ -244,7 +245,7 @@
                 </table>
               </div>
             </div>
-            <div class="form-help mt-2">For finished products, both raw materials and parts are available as BOM components.</div>
+            <div class="form-help mt-2">Raw materials are grouped by RM ID and name. Select the RM first, then choose its colour variant.</div>
           </div>
           <div class="modal-footer justify-content-between">
             <button class="btn btn-sm btn-outline-primary" type="button" id="addBomRowBtn">Add Row</button>
@@ -405,28 +406,108 @@
           return option;
         };
 
-        const setComponentOptions = (selectEl, productId, selectedComponent) => {
-          selectEl.replaceChildren();
-          const selectedValue = String(selectedComponent || "");
-          if (!productId) {
-            selectEl.disabled = true;
-            selectEl.appendChild(makeOption("", "Select target first", true));
-            return;
+        const findSelectedComponent = (options, componentValue) => {
+          const selectedValue = String(componentValue || "");
+          if (!selectedValue) {
+            return null;
           }
 
+          for (const optionItem of options) {
+            if (optionItem.kind === "part" && String(optionItem.value) === selectedValue) {
+              return { groupValue: String(optionItem.value), componentValue: String(optionItem.value) };
+            }
+            if (optionItem.kind !== "raw_material") {
+              continue;
+            }
+            const variants = Array.isArray(optionItem.variants) ? optionItem.variants : [];
+            for (const variant of variants) {
+              if (String(variant.value) === selectedValue) {
+                return { groupValue: String(optionItem.value), componentValue: String(variant.value) };
+              }
+            }
+          }
+
+          return null;
+        };
+
+        const setComponentOptions = (componentSelect, colourSelect, componentInput, productId, selectedComponent) => {
+          componentSelect.replaceChildren();
+          colourSelect.replaceChildren();
+          componentInput.value = "";
           const options = productComponentMap[String(productId)] || [];
-          if (!options.length) {
-            selectEl.disabled = true;
-            selectEl.appendChild(makeOption("", "No available components", true));
+          const selectedEntry = findSelectedComponent(options, selectedComponent);
+
+          if (!productId) {
+            componentSelect.disabled = true;
+            colourSelect.disabled = true;
+            colourSelect.required = false;
+            componentSelect.appendChild(makeOption("", "Select target first", true));
+            colourSelect.appendChild(makeOption("", "Select RM first", true));
             return;
           }
 
-          selectEl.disabled = false;
-          selectEl.appendChild(makeOption("", "Select component", selectedValue === ""));
+          if (!options.length) {
+            componentSelect.disabled = true;
+            colourSelect.disabled = true;
+            colourSelect.required = false;
+            componentSelect.appendChild(makeOption("", "No available components", true));
+            colourSelect.appendChild(makeOption("", "No colours available", true));
+            return;
+          }
+
+          const selectedGroupValue = selectedEntry ? selectedEntry.groupValue : "";
+          componentSelect.disabled = false;
+          componentSelect.appendChild(makeOption("", "Select component", selectedGroupValue === ""));
           options.forEach((optionItem) => {
             const optionValue = String(optionItem.value);
-            selectEl.appendChild(makeOption(optionValue, optionItem.label, optionValue === selectedValue));
+            componentSelect.appendChild(makeOption(optionValue, optionItem.label, optionValue === selectedGroupValue));
           });
+
+          const syncVariantOptions = (selectedVariantValue) => {
+            colourSelect.replaceChildren();
+            colourSelect.required = false;
+            componentInput.value = "";
+
+            const selectedOption = options.find((optionItem) => String(optionItem.value) === String(componentSelect.value));
+            if (!selectedOption) {
+              colourSelect.disabled = true;
+              colourSelect.appendChild(makeOption("", "Select RM first", true));
+              return;
+            }
+
+            if (selectedOption.kind === "part") {
+              colourSelect.disabled = true;
+              colourSelect.appendChild(makeOption("", "Not applicable for parts", true));
+              componentInput.value = String(selectedOption.value);
+              return;
+            }
+
+            const variants = Array.isArray(selectedOption.variants) ? selectedOption.variants : [];
+            if (!variants.length) {
+              colourSelect.disabled = true;
+              colourSelect.appendChild(makeOption("", "No colours available", true));
+              return;
+            }
+
+            colourSelect.disabled = false;
+            colourSelect.required = true;
+            const resolvedVariantValue = String(selectedVariantValue || "");
+            colourSelect.appendChild(makeOption("", "Select colour", resolvedVariantValue === ""));
+            variants.forEach((variant) => {
+              const variantValue = String(variant.value);
+              colourSelect.appendChild(makeOption(variantValue, variant.label, variantValue === resolvedVariantValue));
+            });
+            componentInput.value = colourSelect.value || "";
+          };
+
+          componentSelect.onchange = () => {
+            syncVariantOptions("");
+          };
+          colourSelect.onchange = () => {
+            componentInput.value = colourSelect.value || "";
+          };
+
+          syncVariantOptions(selectedEntry ? selectedEntry.componentValue : "");
         };
 
         const createRow = (rowData) => {
@@ -434,6 +515,7 @@
 
           const productCell = document.createElement("td");
           const componentCell = document.createElement("td");
+          const colourCell = document.createElement("td");
           const qtyCell = document.createElement("td");
           const removeCell = document.createElement("td");
 
@@ -448,9 +530,15 @@
           });
 
           const componentSelect = document.createElement("select");
-          componentSelect.name = "bom_component";
           componentSelect.className = "form-select form-select-sm";
           componentSelect.required = true;
+
+          const colourSelect = document.createElement("select");
+          colourSelect.className = "form-select form-select-sm";
+
+          const componentInput = document.createElement("input");
+          componentInput.type = "hidden";
+          componentInput.name = "bom_component";
 
           const qtyInput = document.createElement("input");
           qtyInput.name = "bom_qty";
@@ -468,18 +556,21 @@
           removeBtn.setAttribute("data-remove-row", "1");
 
           productSelect.addEventListener("change", () => {
-            setComponentOptions(componentSelect, productSelect.value, "");
+            setComponentOptions(componentSelect, colourSelect, componentInput, productSelect.value, "");
           });
 
-          setComponentOptions(componentSelect, productSelect.value, rowData.component || "");
+          setComponentOptions(componentSelect, colourSelect, componentInput, productSelect.value, rowData.component || "");
 
           productCell.appendChild(productSelect);
           componentCell.appendChild(componentSelect);
+          colourCell.appendChild(colourSelect);
+          componentCell.appendChild(componentInput);
           qtyCell.appendChild(qtyInput);
           removeCell.appendChild(removeBtn);
 
           row.appendChild(productCell);
           row.appendChild(componentCell);
+          row.appendChild(colourCell);
           row.appendChild(qtyCell);
           row.appendChild(removeCell);
           rowsBody.appendChild(row);

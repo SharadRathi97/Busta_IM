@@ -8,6 +8,23 @@ from inventory.models import RawMaterial
 from .models import BOMItem, FinishedProduct, ProductionOrder
 
 
+def _raw_material_base_label(material: RawMaterial) -> str:
+    identifier = material.rm_id or material.code
+    return f"Raw Material - {material.name} ({identifier})"
+
+
+def _raw_material_variant_label(material: RawMaterial) -> str:
+    return material.variant_display or material.code or material.rm_id or "Default"
+
+
+def _raw_material_choice_label(material: RawMaterial) -> str:
+    return f"{_raw_material_base_label(material)} - {_raw_material_variant_label(material)}"
+
+
+def _part_choice_label(part: FinishedProduct) -> str:
+    return f"Part - {part.name}{f' [{part.colour}]' if part.colour else ''} ({part.sku})"
+
+
 def _component_value_for_item(item: BOMItem) -> str:
     if item.material_id:
         return f"raw:{item.material_id}"
@@ -60,7 +77,7 @@ def build_bom_component_choices(
         material_qs = material_qs.exclude(id__in=used_material_ids)
 
     choices: list[tuple[str, str]] = [
-        (f"raw:{material.id}", f"Raw Material - {material.name} ({material.code})")
+        (f"raw:{material.id}", _raw_material_choice_label(material))
         for material in material_qs
     ]
 
@@ -74,12 +91,80 @@ def build_bom_component_choices(
         choices.extend(
             (
                 f"part:{part.id}",
-                f"Part - {part.name}{f' [{part.colour}]' if part.colour else ''} ({part.sku})",
+                _part_choice_label(part),
             )
             for part in part_qs
         )
 
     return choices
+
+
+def build_bom_component_catalog(
+    *,
+    target_product: FinishedProduct | None = None,
+    exclude_bom_item_id: int | None = None,
+) -> list[dict[str, object]]:
+    used_material_ids: set[int] = set()
+    used_part_ids: set[int] = set()
+    if target_product:
+        existing = BOMItem.objects.filter(product=target_product)
+        if exclude_bom_item_id:
+            existing = existing.exclude(pk=exclude_bom_item_id)
+        used_material_ids = set(existing.filter(material__isnull=False).values_list("material_id", flat=True))
+        used_part_ids = set(existing.filter(part__isnull=False).values_list("part_id", flat=True))
+
+    material_qs = RawMaterial.objects.order_by("name", "rm_id", "colour", "colour_code", "pantone_number", "id")
+    if used_material_ids:
+        material_qs = material_qs.exclude(id__in=used_material_ids)
+
+    grouped_materials: dict[tuple[str, str], dict[str, object]] = {}
+    ordered_material_keys: list[tuple[str, str]] = []
+    for material in material_qs:
+        group_key = (material.rm_id, material.name)
+        if group_key not in grouped_materials:
+            grouped_materials[group_key] = {
+                "label": _raw_material_base_label(material),
+                "kind": "raw_material",
+                "variants": [],
+            }
+            ordered_material_keys.append(group_key)
+        grouped_materials[group_key]["variants"].append(
+            {
+                "value": f"raw:{material.id}",
+                "label": _raw_material_variant_label(material),
+            }
+        )
+
+    catalog: list[dict[str, object]] = []
+    for group_index, group_key in enumerate(ordered_material_keys):
+        group_data = grouped_materials[group_key]
+        catalog.append(
+            {
+                "value": f"raw-group:{group_index}",
+                "label": group_data["label"],
+                "kind": group_data["kind"],
+                "variants": group_data["variants"],
+            }
+        )
+
+    include_parts = target_product is None or target_product.item_type == FinishedProduct.ItemType.FINISHED
+    if include_parts:
+        part_qs = FinishedProduct.objects.filter(item_type=FinishedProduct.ItemType.PART).order_by("name")
+        if target_product:
+            part_qs = part_qs.exclude(id=target_product.id)
+        if used_part_ids:
+            part_qs = part_qs.exclude(id__in=used_part_ids)
+        catalog.extend(
+            {
+                "value": f"part:{part.id}",
+                "label": _part_choice_label(part),
+                "kind": "part",
+                "variants": [],
+            }
+            for part in part_qs
+        )
+
+    return catalog
 
 
 class FinishedProductForm(forms.ModelForm):

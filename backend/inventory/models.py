@@ -73,6 +73,19 @@ class RawMaterial(models.Model):
         names.update(self.vendor_links.select_related("vendor").values_list("vendor__name", flat=True))
         return ", ".join(sorted(names))
 
+    @property
+    def variant_display(self) -> str:
+        values: list[str] = []
+        seen: set[str] = set()
+        for raw_value in (self.colour, self.colour_code, self.pantone_number):
+            value = (raw_value or "").strip()
+            normalized = value.casefold()
+            if not value or normalized in seen:
+                continue
+            seen.add(normalized)
+            values.append(value)
+        return " / ".join(values)
+
 
 class RawMaterialVendor(models.Model):
     material = models.ForeignKey(RawMaterial, on_delete=models.CASCADE, related_name="vendor_links")

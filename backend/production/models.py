@@ -84,6 +84,8 @@ class BOMItem(models.Model):
     @property
     def component_name(self) -> str:
         if self.material_id:
+            if self.material.variant_display:
+                return f"{self.material.name} ({self.material.variant_display})"
             return self.material.name
         if self.part_id:
             if self.part.colour:
@@ -189,6 +191,8 @@ class ProductionConsumption(models.Model):
     @property
     def component_name(self) -> str:
         if self.material_id:
+            if self.material.variant_display:
+                return f"{self.material.name} ({self.material.variant_display})"
             return self.material.name
         if self.part_id:
             return self.part.name
