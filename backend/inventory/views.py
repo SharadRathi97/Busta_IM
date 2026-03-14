@@ -328,8 +328,6 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
 
     payloads: list[dict] = []
     errors: list[str] = []
-    seen_vendor_colour_rows: dict[tuple[str, str], int] = {}
-    seen_pantone_rows: dict[tuple[str, str], int] = {}
 
     for row_number, row in enumerate(rows, start=2):
         vendor = _resolve_supplier_by_gst(row.get("vendor_gst_number", ""))
@@ -377,28 +375,6 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
                     row_errors.extend(f"{field}: {err}" for err in field_errors)
             errors.append(f"Row {row_number}: {'; '.join(row_errors)}")
             continue
-
-        rm_id = form.cleaned_data["rm_id"]
-        vendor_colour_code = form.cleaned_data["colour_code"]
-        pantone_number = form.cleaned_data["pantone_number"]
-        if vendor_colour_code:
-            vendor_colour_key = (rm_id, vendor_colour_code)
-            previous_row = seen_vendor_colour_rows.get(vendor_colour_key)
-            if previous_row:
-                errors.append(
-                    f"Row {row_number}: duplicate RM ID + Vendor Colour Code in this CSV (already in row {previous_row})."
-                )
-                continue
-            seen_vendor_colour_rows[vendor_colour_key] = row_number
-        if pantone_number:
-            pantone_key = (rm_id, pantone_number)
-            previous_row = seen_pantone_rows.get(pantone_key)
-            if previous_row:
-                errors.append(
-                    f"Row {row_number}: duplicate RM ID + Pantone Number in this CSV (already in row {previous_row})."
-                )
-                continue
-            seen_pantone_rows[pantone_key] = row_number
 
         payloads.append(
             {
@@ -543,36 +519,6 @@ def material_list(request):
                             errors_for_row.extend(f"{field_name}: {err}" for err in field_errors)
                     row_errors.append(f"Row {row_index}: {'; '.join(errors_for_row)}")
 
-                if not row_errors:
-                    seen_vendor_colour_rows: dict[tuple[str, str], int] = {}
-                    seen_pantone_rows: dict[tuple[str, str], int] = {}
-                    for row_index, row_form in enumerate(row_forms, start=1):
-                        rm_id = row_form.cleaned_data["rm_id"]
-                        colour_code = row_form.cleaned_data["colour_code"]
-                        pantone_number = row_form.cleaned_data["pantone_number"]
-                        if colour_code:
-                            vendor_colour_key = (rm_id, colour_code)
-                            previous_vendor_colour_row = seen_vendor_colour_rows.get(vendor_colour_key)
-                            if previous_vendor_colour_row:
-                                row_errors.append(
-                                    "Row "
-                                    f"{row_index}: Duplicate RM ID + Vendor Colour Code in submission "
-                                    f"(already in row {previous_vendor_colour_row})."
-                                )
-                            else:
-                                seen_vendor_colour_rows[vendor_colour_key] = row_index
-                        if pantone_number:
-                            pantone_key = (rm_id, pantone_number)
-                            previous_pantone_row = seen_pantone_rows.get(pantone_key)
-                            if previous_pantone_row:
-                                row_errors.append(
-                                    "Row "
-                                    f"{row_index}: Duplicate RM ID + Pantone Number in submission "
-                                    f"(already in row {previous_pantone_row})."
-                                )
-                            else:
-                                seen_pantone_rows[pantone_key] = row_index
-
                 if row_errors:
                     for row_error in row_errors[:8]:
                         messages.error(request, row_error)
@@ -599,7 +545,7 @@ def material_list(request):
                                     reorder_level=row_form.cleaned_data["reorder_level"],
                                     created_by=request.user,
                                 )
-                        messages.success(request, f"Raw materials created for {len(row_forms)} colour variant(s).")
+                        messages.success(request, f"Raw material rows processed for {len(row_forms)} colour variant(s).")
                         return redirect("inventory:list")
                     except ValueError as exc:
                         messages.error(request, str(exc))
@@ -642,7 +588,7 @@ def material_list(request):
                 try:
                     rows = _read_csv_rows(csv_form.cleaned_data["csv_file"])
                     imported_count = _import_raw_materials_from_rows(rows, created_by=request.user)
-                    messages.success(request, f"Raw material CSV imported. Created: {imported_count}.")
+                    messages.success(request, f"Raw material CSV imported. Processed rows: {imported_count}.")
                     return redirect("inventory:list")
                 except ValidationError as exc:
                     errors = exc.messages if hasattr(exc, "messages") else [str(exc)]

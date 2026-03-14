@@ -159,6 +159,48 @@ class RawMaterialCostTests(TestCase):
         self.assertEqual(material.code, "RMID-PAN-001-PANTONE-286 C")
         self.assertEqual(material.pantone_number, "PANTONE-286 C")
 
+    def test_create_raw_material_merges_same_rm_id_and_pantone(self):
+        self.client.force_login(self.user)
+        material = RawMaterial.objects.create(
+            name="Existing Pantone Strap",
+            rm_id="RMID-PAN-002",
+            code="RMID-PAN-002-PANTONE-286 C",
+            material_type=RawMaterial.MaterialType.ACCESSORY,
+            colour="Blue",
+            colour_code="",
+            pantone_number="PANTONE-286 C",
+            unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("40.000"),
+            current_stock=Decimal("8.000"),
+            reorder_level=Decimal("2.000"),
+            vendor=self.vendor,
+        )
+
+        response = self.client.post(
+            reverse("inventory:list"),
+            {
+                "name": "Incoming Pantone Strap",
+                "rm_id": "RMID-PAN-002",
+                "code": "DIFF-PANTONE-CODE",
+                "material_type": RawMaterial.MaterialType.ACCESSORY,
+                "colour": "Blue",
+                "colour_code": "",
+                "pantone_number": "PANTONE-286 C",
+                "unit": RawMaterial.Unit.METER,
+                "cost_per_unit": "52.000",
+                "vendor": str(self.vendor.id),
+                "opening_stock": "4.000",
+                "reorder_level": "5.000",
+            },
+        )
+
+        self.assertRedirects(response, reverse("inventory:list"))
+        material.refresh_from_db()
+        self.assertEqual(RawMaterial.objects.filter(rm_id="RMID-PAN-002", pantone_number="PANTONE-286 C").count(), 1)
+        self.assertEqual(material.current_stock, Decimal("12.000"))
+        self.assertEqual(material.cost_per_unit, Decimal("44.000"))
+        self.assertEqual(material.code, "RMID-PAN-002-PANTONE-286 C")
+
     def test_create_raw_material_requires_vendor_colour_code_or_pantone(self):
         self.client.force_login(self.user)
 
@@ -293,9 +335,9 @@ class RawMaterialCostTests(TestCase):
         self.assertEqual(material.current_stock, Decimal("15.000"))
         self.assertEqual(material.code, "RMID-CANVAS-002-BLU")
 
-    def test_create_material_rejects_duplicate_rm_id_and_colour_code_with_different_code(self):
+    def test_create_material_merges_duplicate_rm_id_and_colour_code_with_different_code(self):
         self.client.force_login(self.user)
-        RawMaterial.objects.create(
+        material = RawMaterial.objects.create(
             name="Existing Canvas",
             rm_id="RMID-CANVAS-004",
             code="RMID-CANVAS-004-BLU",
@@ -303,6 +345,7 @@ class RawMaterialCostTests(TestCase):
             colour="Blue",
             colour_code="BLU",
             unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("40.000"),
             current_stock=Decimal("10.000"),
             reorder_level=Decimal("2.000"),
             vendor=self.vendor,
@@ -325,15 +368,14 @@ class RawMaterialCostTests(TestCase):
                 "variant_code": ["DIFF-CODE-001"],
                 "variant_opening_stock": ["5.000"],
             },
-            follow=True,
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "RM ID and Vendor Colour Code combination already exists with a different material code")
-        self.assertEqual(
-            RawMaterial.objects.filter(rm_id="RMID-CANVAS-004", colour_code="BLU").count(),
-            1,
-        )
+        self.assertRedirects(response, reverse("inventory:list"))
+        material.refresh_from_db()
+        self.assertEqual(RawMaterial.objects.filter(rm_id="RMID-CANVAS-004", colour_code="BLU").count(), 1)
+        self.assertEqual(material.current_stock, Decimal("15.000"))
+        self.assertEqual(material.cost_per_unit, Decimal("44.000"))
+        self.assertEqual(material.code, "RMID-CANVAS-004-BLU")
 
     def test_create_material_merges_existing_case_insensitive_code_and_colour_code(self):
         self.client.force_login(self.user)
@@ -522,7 +564,7 @@ class RawMaterialCostTests(TestCase):
         self.assertEqual(first.current_stock, Decimal("100.000"))
         self.assertEqual(second.current_stock, Decimal("25.000"))
 
-    def test_create_material_rejects_duplicate_rm_id_and_colour_code_in_same_submit(self):
+    def test_create_material_merges_duplicate_rm_id_and_colour_code_in_same_submit(self):
         self.client.force_login(self.user)
 
         response = self.client.post(
@@ -542,12 +584,13 @@ class RawMaterialCostTests(TestCase):
                 "variant_code": ["", ""],
                 "variant_opening_stock": ["4.000", "6.000"],
             },
-            follow=True,
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Duplicate RM ID + Vendor Colour Code in submission")
-        self.assertFalse(RawMaterial.objects.filter(rm_id="RMID-CANVAS-003").exists())
+        self.assertRedirects(response, reverse("inventory:list"))
+        material = RawMaterial.objects.get(rm_id="RMID-CANVAS-003", colour_code="BLU")
+        self.assertEqual(RawMaterial.objects.filter(rm_id="RMID-CANVAS-003", colour_code="BLU").count(), 1)
+        self.assertEqual(material.current_stock, Decimal("10.000"))
+        self.assertEqual(material.cost_per_unit, Decimal("40.000"))
 
     def test_raw_material_csv_template_download(self):
         self.client.force_login(self.user)
@@ -583,12 +626,12 @@ class RawMaterialCostTests(TestCase):
         self.assertEqual(material.rm_id, "RMID-CSV-001")
         self.assertEqual(material.colour_code, "BLU")
 
-    def test_raw_material_csv_upload_rejects_duplicate_variant_rows_in_same_file(self):
+    def test_raw_material_csv_upload_merges_duplicate_variant_rows_in_same_file(self):
         self.client.force_login(self.user)
         csv_content = (
             "name,rm_id,code,material_type,colour,colour_code,pantone_number,unit,cost_per_unit,vendor_gst_number,additional_vendor_gst_numbers,opening_stock,reorder_level\n"
             "CSV Canvas Blue,RMID-CSV-002,RM-CSV-BLU,fabric,Blue,BLU,,m,44.500,29ABCDE5678F1Z5,,120.000,25.000\n"
-            "CSV Canvas Blue Duplicate,RMID-CSV-002,RM-CSV-BLU-2,fabric,Blue,BLU,,m,44.500,29ABCDE5678F1Z5,,20.000,5.000\n"
+            "CSV Canvas Blue Duplicate,RMID-CSV-002,RM-CSV-BLU-2,fabric,Blue,BLU,,m,55.000,29ABCDE5678F1Z5,,20.000,5.000\n"
         )
         upload = SimpleUploadedFile("materials.csv", csv_content.encode("utf-8"), content_type="text/csv")
 
@@ -598,12 +641,13 @@ class RawMaterialCostTests(TestCase):
                 "action": "upload_csv",
                 "csv_file": upload,
             },
-            follow=True,
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "duplicate RM ID + Vendor Colour Code in this CSV")
-        self.assertFalse(RawMaterial.objects.filter(rm_id="RMID-CSV-002", colour_code="BLU").exists())
+        self.assertRedirects(response, reverse("inventory:list"))
+        material = RawMaterial.objects.get(rm_id="RMID-CSV-002", colour_code="BLU")
+        self.assertEqual(RawMaterial.objects.filter(rm_id="RMID-CSV-002", colour_code="BLU").count(), 1)
+        self.assertEqual(material.current_stock, Decimal("140.000"))
+        self.assertEqual(material.cost_per_unit, Decimal("46.000"))
 
     def test_delete_raw_material_removes_vendor_and_bom_mappings(self):
         self.client.force_login(self.user)

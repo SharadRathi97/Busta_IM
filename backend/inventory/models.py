@@ -164,6 +164,83 @@ class MROInventoryLedger(models.Model):
         ordering = ["-id"]
 
 
+def _choose_existing_material_for_vendor(*, candidate_materials: list[RawMaterial], vendor: Partner) -> RawMaterial:
+    existing_material = next(
+        (candidate for candidate in candidate_materials if candidate.vendor_id == vendor.id),
+        None,
+    )
+    if existing_material:
+        return existing_material
+
+    candidate_ids = [candidate.id for candidate in candidate_materials]
+    linked_candidate_ids = set(
+        RawMaterialVendor.objects.filter(
+            material_id__in=candidate_ids,
+            vendor_id=vendor.id,
+        ).values_list("material_id", flat=True)
+    )
+    existing_material = next(
+        (candidate for candidate in candidate_materials if candidate.id in linked_candidate_ids),
+        None,
+    )
+    if existing_material:
+        return existing_material
+
+    return candidate_materials[0]
+
+
+def _find_existing_raw_material_for_variant(
+    *,
+    rm_id: str,
+    colour_code: str,
+    pantone_number: str,
+    vendor: Partner,
+) -> RawMaterial | None:
+    variant_filters = Q()
+    if colour_code:
+        variant_filters |= Q(colour_code__iexact=colour_code)
+    if pantone_number:
+        variant_filters |= Q(pantone_number__iexact=pantone_number)
+    if not variant_filters:
+        return None
+
+    candidate_materials = list(
+        RawMaterial.objects.select_for_update()
+        .filter(rm_id__iexact=rm_id)
+        .filter(variant_filters)
+        .order_by("id")
+        .distinct()
+    )
+    if not candidate_materials:
+        return None
+
+    colour_matches = [
+        candidate for candidate in candidate_materials if colour_code and candidate.colour_code.upper() == colour_code
+    ]
+    pantone_matches = [
+        candidate
+        for candidate in candidate_materials
+        if pantone_number and candidate.pantone_number.upper() == pantone_number
+    ]
+
+    matched_candidates = candidate_materials
+    if colour_matches and pantone_matches:
+        overlapping_ids = {candidate.id for candidate in colour_matches} & {
+            candidate.id for candidate in pantone_matches
+        }
+        if not overlapping_ids:
+            raise ValueError(
+                "This RM ID + Vendor Colour Code and RM ID + Pantone Number combination matches different materials."
+            )
+        matched_candidates = [candidate for candidate in candidate_materials if candidate.id in overlapping_ids]
+    elif colour_matches:
+        matched_candidates = colour_matches
+    elif pantone_matches:
+        matched_candidates = pantone_matches
+
+    return _choose_existing_material_for_vendor(candidate_materials=matched_candidates, vendor=vendor)
+
+
 def create_raw_material_with_opening_stock(
     *,
     name: str,
@@ -204,40 +281,16 @@ def create_raw_material_with_opening_stock(
         raise ValueError("Material code could not be resolved.")
 
     with transaction.atomic():
-        existing_material = None
-        if resolved_colour_code:
-            candidate_materials = list(
-                RawMaterial.objects.select_for_update()
-                .filter(
-                    rm_id__iexact=resolved_rm_id,
-                    code__iexact=resolved_code,
-                    colour_code__iexact=resolved_colour_code,
-                )
-                .order_by("id")
-            )
-            if candidate_materials:
-                existing_material = next(
-                    (candidate for candidate in candidate_materials if candidate.vendor_id == vendor.id),
-                    None,
-                )
-                if not existing_material:
-                    candidate_ids = [candidate.id for candidate in candidate_materials]
-                    linked_candidate_ids = set(
-                        RawMaterialVendor.objects.filter(
-                            material_id__in=candidate_ids,
-                            vendor_id=vendor.id,
-                        ).values_list("material_id", flat=True)
-                    )
-                    existing_material = next(
-                        (candidate for candidate in candidate_materials if candidate.id in linked_candidate_ids),
-                        None,
-                    )
-                if not existing_material:
-                    existing_material = candidate_materials[0]
+        existing_material = _find_existing_raw_material_for_variant(
+            rm_id=resolved_rm_id,
+            colour_code=resolved_colour_code,
+            pantone_number=resolved_pantone_number,
+            vendor=vendor,
+        )
 
         if existing_material:
             if existing_material.unit != unit:
-                raise ValueError("Duplicate material with same code and vendor colour code must use the same unit.")
+                raise ValueError("Duplicate material with the same RM ID variant must use the same unit.")
 
             update_fields: list[str] = []
             if opening_stock > 0:
