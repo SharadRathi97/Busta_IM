@@ -378,6 +378,7 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
 
         payloads.append(
             {
+                "row_number": row_number,
                 "name": form.cleaned_data["name"],
                 "rm_id": form.cleaned_data["rm_id"],
                 "code": form.cleaned_data["code"],
@@ -397,9 +398,10 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
     if errors:
         raise ValidationError(errors)
 
-    try:
-        with transaction.atomic():
-            for payload in payloads:
+    processing_errors: list[str] = []
+    with transaction.atomic():
+        for payload in payloads:
+            try:
                 create_raw_material_with_opening_stock(
                     name=payload["name"],
                     rm_id=payload["rm_id"],
@@ -416,10 +418,16 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
                     reorder_level=payload["reorder_level"],
                     created_by=created_by,
                 )
-    except IntegrityError as exc:
-        raise ValidationError(
-            "Duplicate raw material entry detected. RM ID + Vendor Colour Code or RM ID + Pantone Number must be unique."
-        ) from exc
+            except ValueError as exc:
+                processing_errors.append(f"Row {payload['row_number']}: {exc}")
+            except IntegrityError:
+                processing_errors.append(
+                    "Row "
+                    f"{payload['row_number']}: Duplicate raw material entry detected. "
+                    "RM ID + Vendor Colour Code or RM ID + Pantone Number must be unique."
+                )
+        if processing_errors:
+            raise ValidationError(processing_errors)
     return len(payloads)
 
 

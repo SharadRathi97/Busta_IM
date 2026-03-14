@@ -215,12 +215,14 @@ def _find_existing_raw_material_for_variant(
         return None
 
     colour_matches = [
-        candidate for candidate in candidate_materials if colour_code and candidate.colour_code.upper() == colour_code
+        candidate
+        for candidate in candidate_materials
+        if colour_code and (candidate.colour_code or "").upper() == colour_code
     ]
     pantone_matches = [
         candidate
         for candidate in candidate_materials
-        if pantone_number and candidate.pantone_number.upper() == pantone_number
+        if pantone_number and (candidate.pantone_number or "").upper() == pantone_number
     ]
 
     matched_candidates = candidate_materials

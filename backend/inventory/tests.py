@@ -649,6 +649,57 @@ class RawMaterialCostTests(TestCase):
         self.assertEqual(material.current_stock, Decimal("140.000"))
         self.assertEqual(material.cost_per_unit, Decimal("46.000"))
 
+    def test_raw_material_csv_upload_shows_merge_conflict_as_row_error(self):
+        self.client.force_login(self.user)
+        RawMaterial.objects.create(
+            name="Existing Blue Canvas",
+            rm_id="RMID-CSV-CONFLICT-001",
+            code="RMID-CSV-CONFLICT-001-BLU",
+            material_type=RawMaterial.MaterialType.FABRIC,
+            colour="Blue",
+            colour_code="BLU",
+            unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("44.500"),
+            current_stock=Decimal("10.000"),
+            reorder_level=Decimal("2.000"),
+            vendor=self.vendor,
+        )
+        RawMaterial.objects.create(
+            name="Existing Pantone Canvas",
+            rm_id="RMID-CSV-CONFLICT-001",
+            code="RMID-CSV-CONFLICT-001-PANTONE-286 C",
+            material_type=RawMaterial.MaterialType.FABRIC,
+            colour="Blue",
+            colour_code="NAVY",
+            pantone_number="PANTONE-286 C",
+            unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("46.000"),
+            current_stock=Decimal("12.000"),
+            reorder_level=Decimal("3.000"),
+            vendor=self.vendor,
+        )
+        csv_content = (
+            "name,rm_id,code,material_type,colour,colour_code,pantone_number,unit,cost_per_unit,vendor_gst_number,additional_vendor_gst_numbers,opening_stock,reorder_level\n"
+            "CSV Canvas Conflict,RMID-CSV-CONFLICT-001,RM-CSV-CONFLICT,fabric,Blue,BLU,PANTONE-286 C,m,50.000,29ABCDE5678F1Z5,,20.000,5.000\n"
+        )
+        upload = SimpleUploadedFile("materials.csv", csv_content.encode("utf-8"), content_type="text/csv")
+
+        response = self.client.post(
+            reverse("inventory:list"),
+            {
+                "action": "upload_csv",
+                "csv_file": upload,
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "RM ID + Vendor Colour Code and RM ID + Pantone Number combination matches different materials",
+        )
+        self.assertEqual(RawMaterial.objects.filter(rm_id="RMID-CSV-CONFLICT-001").count(), 2)
+
     def test_delete_raw_material_removes_vendor_and_bom_mappings(self):
         self.client.force_login(self.user)
         extra_vendor = Partner.objects.create(
