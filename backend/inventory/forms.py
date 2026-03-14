@@ -209,10 +209,11 @@ class MROItemBaseForm(forms.Form):
     )
     unit = forms.ChoiceField(choices=MROItem.Unit.choices, widget=forms.Select(attrs={"class": "form-select"}))
     cost_per_unit = forms.DecimalField(
+        required=False,
         min_value=Decimal("0"),
         decimal_places=3,
         max_digits=12,
-        widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.001"}),
+        widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.001", "placeholder": "Optional"}),
     )
     vendor = forms.ModelChoiceField(
         queryset=Partner.objects.none(),
@@ -238,6 +239,7 @@ class MROItemBaseForm(forms.Form):
         ).order_by("name")
         self.fields["vendor"].queryset = supplier_queryset
         self.fields["code"].help_text = "Optional. If left blank, system uses MRO ID."
+        self.fields["cost_per_unit"].help_text = "Optional. Defaults to 0 if left blank."
 
     def clean_mro_id(self):
         mro_id = (self.cleaned_data.get("mro_id") or "").strip().upper()
@@ -264,6 +266,7 @@ class MROItemBaseForm(forms.Form):
         if not resolved_code:
             self.add_error("code", "Item code could not be resolved. Provide Code or valid MRO ID.")
             return cleaned
+        cleaned["cost_per_unit"] = cleaned.get("cost_per_unit") or Decimal("0")
         cleaned["mro_id"] = mro_id
         cleaned["code"] = resolved_code
         return cleaned

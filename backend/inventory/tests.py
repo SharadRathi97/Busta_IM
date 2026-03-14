@@ -685,6 +685,30 @@ class MROInventoryFlowTests(TestCase):
         self.assertEqual(item.location, "Tool Cage A1")
         self.assertTrue(MROInventoryLedger.objects.filter(item=item, reason="Opening stock").exists())
 
+    def test_create_mro_item_without_cost_per_unit_defaults_to_zero(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("inventory:mro_list"),
+            {
+                "action": "create_mro_item",
+                "name": "Hex Key Set",
+                "mro_id": "MRO-TOOL-002",
+                "code": "",
+                "item_type": MROItem.ItemType.TOOL,
+                "unit": MROItem.Unit.SET,
+                "cost_per_unit": "",
+                "vendor": str(self.vendor.id),
+                "location": "Tool Cage A2",
+                "opening_stock": "4.000",
+                "reorder_level": "1.000",
+            },
+        )
+
+        self.assertRedirects(response, reverse("inventory:mro_list"))
+        item = MROItem.objects.get(mro_id="MRO-TOOL-002")
+        self.assertEqual(item.cost_per_unit, Decimal("0.000"))
+        self.assertEqual(item.current_stock, Decimal("4.000"))
+
     def test_create_mro_item_rejects_duplicate_mro_id(self):
         MROItem.objects.create(
             name="Existing Item",
