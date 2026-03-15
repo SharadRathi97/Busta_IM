@@ -406,6 +406,19 @@
           return option;
         };
 
+        const makeSearchInput = (placeholder) => {
+          const input = document.createElement("input");
+          input.type = "search";
+          input.className = "form-control form-control-sm mb-1";
+          input.placeholder = placeholder;
+          input.autocomplete = "off";
+          return input;
+        };
+
+        const matchesQuery = (value, query) => {
+          return String(value || "").toLowerCase().includes(String(query || "").trim().toLowerCase());
+        };
+
         const findSelectedComponent = (options, componentValue) => {
           const selectedValue = String(componentValue || "");
           if (!selectedValue) {
@@ -430,88 +443,10 @@
           return null;
         };
 
-        const setComponentOptions = (componentSelect, colourSelect, componentInput, productId, selectedComponent) => {
-          componentSelect.replaceChildren();
-          colourSelect.replaceChildren();
-          componentInput.value = "";
-          const options = productComponentMap[String(productId)] || [];
-          const selectedEntry = findSelectedComponent(options, selectedComponent);
-
-          if (!productId) {
-            componentSelect.disabled = true;
-            colourSelect.disabled = true;
-            colourSelect.required = false;
-            componentSelect.appendChild(makeOption("", "Select target first", true));
-            colourSelect.appendChild(makeOption("", "Select RM first", true));
-            return;
-          }
-
-          if (!options.length) {
-            componentSelect.disabled = true;
-            colourSelect.disabled = true;
-            colourSelect.required = false;
-            componentSelect.appendChild(makeOption("", "No available components", true));
-            colourSelect.appendChild(makeOption("", "No colours available", true));
-            return;
-          }
-
-          const selectedGroupValue = selectedEntry ? selectedEntry.groupValue : "";
-          componentSelect.disabled = false;
-          componentSelect.appendChild(makeOption("", "Select component", selectedGroupValue === ""));
-          options.forEach((optionItem) => {
-            const optionValue = String(optionItem.value);
-            componentSelect.appendChild(makeOption(optionValue, optionItem.label, optionValue === selectedGroupValue));
-          });
-
-          const syncVariantOptions = (selectedVariantValue) => {
-            colourSelect.replaceChildren();
-            colourSelect.required = false;
-            componentInput.value = "";
-
-            const selectedOption = options.find((optionItem) => String(optionItem.value) === String(componentSelect.value));
-            if (!selectedOption) {
-              colourSelect.disabled = true;
-              colourSelect.appendChild(makeOption("", "Select RM first", true));
-              return;
-            }
-
-            if (selectedOption.kind === "part") {
-              colourSelect.disabled = true;
-              colourSelect.appendChild(makeOption("", "Not applicable for parts", true));
-              componentInput.value = String(selectedOption.value);
-              return;
-            }
-
-            const variants = Array.isArray(selectedOption.variants) ? selectedOption.variants : [];
-            if (!variants.length) {
-              colourSelect.disabled = true;
-              colourSelect.appendChild(makeOption("", "No colours available", true));
-              return;
-            }
-
-            colourSelect.disabled = false;
-            colourSelect.required = true;
-            const resolvedVariantValue = String(selectedVariantValue || "");
-            colourSelect.appendChild(makeOption("", "Select colour", resolvedVariantValue === ""));
-            variants.forEach((variant) => {
-              const variantValue = String(variant.value);
-              colourSelect.appendChild(makeOption(variantValue, variant.label, variantValue === resolvedVariantValue));
-            });
-            componentInput.value = colourSelect.value || "";
-          };
-
-          componentSelect.onchange = () => {
-            syncVariantOptions("");
-          };
-          colourSelect.onchange = () => {
-            componentInput.value = colourSelect.value || "";
-          };
-
-          syncVariantOptions(selectedEntry ? selectedEntry.componentValue : "");
-        };
-
         const createRow = (rowData) => {
           const row = document.createElement("tr");
+          const initialProductValue = rowData.product || "";
+          const initialComponentValue = rowData.component || "";
 
           const productCell = document.createElement("td");
           const componentCell = document.createElement("td");
@@ -519,20 +454,18 @@
           const qtyCell = document.createElement("td");
           const removeCell = document.createElement("td");
 
+          const productSearch = makeSearchInput("Type to filter targets");
           const productSelect = document.createElement("select");
           productSelect.name = "bom_product";
           productSelect.className = "form-select form-select-sm";
           productSelect.required = true;
-          productSelect.appendChild(makeOption("", "Select target", !rowData.product));
-          productChoices.forEach((optionItem) => {
-            const optionValue = String(optionItem.id);
-            productSelect.appendChild(makeOption(optionValue, optionItem.label, optionValue === String(rowData.product || "")));
-          });
 
+          const componentSearch = makeSearchInput("Type to filter components");
           const componentSelect = document.createElement("select");
           componentSelect.className = "form-select form-select-sm";
           componentSelect.required = true;
 
+          const colourSearch = makeSearchInput("Type to filter RM colours");
           const colourSelect = document.createElement("select");
           colourSelect.className = "form-select form-select-sm";
 
@@ -555,14 +488,152 @@
           removeBtn.textContent = "Remove";
           removeBtn.setAttribute("data-remove-row", "1");
 
-          productSelect.addEventListener("change", () => {
-            setComponentOptions(componentSelect, colourSelect, componentInput, productSelect.value, "");
+          const renderProductOptions = (preferredValue = productSelect.value || initialProductValue) => {
+            productSelect.replaceChildren();
+            const filteredProducts = productChoices.filter((optionItem) => matchesQuery(optionItem.label, productSearch.value));
+            if (!filteredProducts.length) {
+              productSelect.disabled = true;
+              productSelect.appendChild(makeOption("", "No matching targets", true));
+              return;
+            }
+
+            productSelect.disabled = false;
+            const selectedValue = String(preferredValue || "");
+            const hasSelected = filteredProducts.some((optionItem) => String(optionItem.id) === selectedValue);
+            productSelect.appendChild(makeOption("", "Select target", !hasSelected));
+            filteredProducts.forEach((optionItem) => {
+              const optionValue = String(optionItem.id);
+              productSelect.appendChild(makeOption(optionValue, optionItem.label, optionValue === selectedValue));
+            });
+          };
+
+          const renderColourOptions = (options, preferredVariantValue = componentInput.value || "") => {
+            colourSelect.replaceChildren();
+            colourSelect.required = false;
+            componentInput.value = "";
+
+            const selectedOption = options.find((optionItem) => String(optionItem.value) === String(componentSelect.value));
+            if (!selectedOption) {
+              colourSelect.disabled = true;
+              colourSelect.appendChild(makeOption("", "Select RM first", true));
+              return;
+            }
+
+            if (selectedOption.kind === "part") {
+              colourSelect.disabled = true;
+              colourSelect.appendChild(makeOption("", "Not applicable for parts", true));
+              componentInput.value = String(selectedOption.value);
+              return;
+            }
+
+            const variants = (Array.isArray(selectedOption.variants) ? selectedOption.variants : []).filter((variant) =>
+              matchesQuery(variant.label, colourSearch.value)
+            );
+            if (!variants.length) {
+              colourSelect.disabled = true;
+              colourSelect.appendChild(makeOption("", "No matching colours", true));
+              return;
+            }
+
+            colourSelect.disabled = false;
+            colourSelect.required = true;
+            const selectedVariantValue = String(preferredVariantValue || "");
+            const hasSelected = variants.some((variant) => String(variant.value) === selectedVariantValue);
+            colourSelect.appendChild(makeOption("", "Select colour", !hasSelected));
+            variants.forEach((variant) => {
+              const variantValue = String(variant.value);
+              colourSelect.appendChild(makeOption(variantValue, variant.label, variantValue === selectedVariantValue));
+            });
+            componentInput.value = colourSelect.value || "";
+          };
+
+          const renderComponentOptions = (preferredComponentValue = componentInput.value || "") => {
+            componentSelect.replaceChildren();
+            colourSelect.replaceChildren();
+            componentInput.value = "";
+
+            if (!productSelect.value) {
+              componentSelect.disabled = true;
+              colourSelect.disabled = true;
+              colourSelect.required = false;
+              componentSelect.appendChild(makeOption("", "Select target first", true));
+              colourSelect.appendChild(makeOption("", "Select RM first", true));
+              return;
+            }
+
+            const options = productComponentMap[String(productSelect.value)] || [];
+            const filteredOptions = options.filter((optionItem) => {
+              if (matchesQuery(optionItem.label, componentSearch.value)) {
+                return true;
+              }
+              if (optionItem.kind !== "raw_material") {
+                return false;
+              }
+              const variants = Array.isArray(optionItem.variants) ? optionItem.variants : [];
+              return variants.some((variant) => matchesQuery(variant.label, componentSearch.value));
+            });
+            if (!filteredOptions.length) {
+              componentSelect.disabled = true;
+              colourSelect.disabled = true;
+              colourSelect.required = false;
+              componentSelect.appendChild(makeOption("", "No matching components", true));
+              colourSelect.appendChild(makeOption("", "No colours available", true));
+              return;
+            }
+
+            const selectedEntry = findSelectedComponent(filteredOptions, preferredComponentValue);
+            const selectedGroupValue = selectedEntry ? selectedEntry.groupValue : "";
+            componentSelect.disabled = false;
+            componentSelect.appendChild(makeOption("", "Select component", selectedGroupValue === ""));
+            filteredOptions.forEach((optionItem) => {
+              const optionValue = String(optionItem.value);
+              componentSelect.appendChild(makeOption(optionValue, optionItem.label, optionValue === selectedGroupValue));
+            });
+
+            renderColourOptions(filteredOptions, selectedEntry ? selectedEntry.componentValue : "");
+          };
+
+          productSearch.addEventListener("input", () => {
+            const previousProductValue = productSelect.value;
+            renderProductOptions(previousProductValue);
+            if (!productSelect.value && previousProductValue) {
+              componentSearch.value = "";
+              colourSearch.value = "";
+            }
+            renderComponentOptions(componentInput.value || "");
           });
 
-          setComponentOptions(componentSelect, colourSelect, componentInput, productSelect.value, rowData.component || "");
+          productSelect.addEventListener("change", () => {
+            componentSearch.value = "";
+            colourSearch.value = "";
+            renderComponentOptions("");
+          });
 
+          componentSearch.addEventListener("input", () => {
+            renderComponentOptions(componentInput.value || "");
+          });
+
+          componentSelect.addEventListener("change", () => {
+            colourSearch.value = "";
+            renderColourOptions(productComponentMap[String(productSelect.value)] || [], "");
+          });
+
+          colourSearch.addEventListener("input", () => {
+            renderColourOptions(productComponentMap[String(productSelect.value)] || [], componentInput.value || "");
+          });
+
+          colourSelect.addEventListener("change", () => {
+            componentInput.value = colourSelect.value || "";
+          });
+
+          renderProductOptions();
+          renderComponentOptions(initialComponentValue);
+
+          productCell.appendChild(productSearch);
           productCell.appendChild(productSelect);
+          componentCell.appendChild(componentSearch);
           componentCell.appendChild(componentSelect);
+          colourCell.appendChild(colourSearch);
           colourCell.appendChild(colourSelect);
           componentCell.appendChild(componentInput);
           qtyCell.appendChild(qtyInput);

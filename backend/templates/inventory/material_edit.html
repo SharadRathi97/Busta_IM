@@ -257,7 +257,7 @@
           ["reorder_level", fields.reorder_level],
         ];
         mapping.forEach(([key, element]) => {
-          if (!element || changedField === key) {
+          if (!element || changedField === key || activeFilters.has(key)) {
             return;
           }
           const value = uniqueValueForKey(matches, key);
@@ -265,16 +265,16 @@
             element.value = value;
           }
         });
-        if (changedField !== "material_type") {
+        if (changedField !== "material_type" && !activeFilters.has("material_type")) {
           setSelectValue(fields.material_type, uniqueValueForKey(matches, "material_type"));
         }
-        if (changedField !== "unit") {
+        if (changedField !== "unit" && !activeFilters.has("unit")) {
           setSelectValue(fields.unit, uniqueValueForKey(matches, "unit"));
         }
-        if (changedField !== "vendor_id") {
+        if (changedField !== "vendor_id" && !activeFilters.has("vendor_id")) {
           setSelectValue(fields.vendor_id, uniqueValueForKey(matches, "vendor_id"));
         }
-        if (changedField !== "additional_vendors" && matches.length === 1) {
+        if (changedField !== "additional_vendors" && !activeFilters.has("additional_vendors") && matches.length === 1) {
           setAdditionalVendorValues(fields.additional_vendors, matches[0].additional_vendor_ids || []);
         }
       };

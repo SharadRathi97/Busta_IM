@@ -678,6 +678,19 @@
           };
         };
 
+        const activeVariantFilters = new WeakMap();
+        const getActiveVariantFilters = (rowEl) => {
+          if (!rowEl) {
+            return new Set();
+          }
+          let filters = activeVariantFilters.get(rowEl);
+          if (!filters) {
+            filters = new Set();
+            activeVariantFilters.set(rowEl, filters);
+          }
+          return filters;
+        };
+
         const getVariantCriteria = (rowEl) => {
           const inputMap = getVariantInputMap(rowEl);
           if (!inputMap) {
@@ -744,40 +757,40 @@
           if (!candidateRows.length) {
             return;
           }
-          if (changedField !== "name") {
+          if (changedField !== "name" && !activeCommonFilters.has("name")) {
             const value = uniqueValueForKey(candidateRows, "name");
             if (value && commonFields.name) {
               commonFields.name.value = value;
             }
           }
-          if (changedField !== "rm_id") {
+          if (changedField !== "rm_id" && !activeCommonFilters.has("rm_id")) {
             const value = uniqueValueForKey(candidateRows, "rm_id");
             if (value && commonFields.rm_id) {
               commonFields.rm_id.value = value;
             }
           }
-          if (changedField !== "material_type") {
+          if (changedField !== "material_type" && !activeCommonFilters.has("material_type")) {
             setSelectValue(commonFields.material_type, uniqueValueForKey(candidateRows, "material_type"));
           }
-          if (changedField !== "unit") {
+          if (changedField !== "unit" && !activeCommonFilters.has("unit")) {
             setSelectValue(commonFields.unit, uniqueValueForKey(candidateRows, "unit"));
           }
-          if (changedField !== "cost_per_unit") {
+          if (changedField !== "cost_per_unit" && !activeCommonFilters.has("cost_per_unit")) {
             const value = uniqueValueForKey(candidateRows, "cost_per_unit");
             if (value && commonFields.cost_per_unit) {
               commonFields.cost_per_unit.value = value;
             }
           }
-          if (changedField !== "reorder_level") {
+          if (changedField !== "reorder_level" && !activeCommonFilters.has("reorder_level")) {
             const value = uniqueValueForKey(candidateRows, "reorder_level");
             if (value && commonFields.reorder_level) {
               commonFields.reorder_level.value = value;
             }
           }
-          if (changedField !== "vendor_id") {
+          if (changedField !== "vendor_id" && !activeCommonFilters.has("vendor_id")) {
             setSelectValue(commonFields.vendor_id, uniqueValueForKey(candidateRows, "vendor_id"));
           }
-          if (changedField !== "additional_vendors" && candidateRows.length === 1) {
+          if (changedField !== "additional_vendors" && !activeCommonFilters.has("additional_vendors") && candidateRows.length === 1) {
             setAdditionalVendorValues(commonFields.additional_vendors, candidateRows[0].additional_vendor_ids || []);
           }
         };
@@ -787,28 +800,29 @@
             return;
           }
           const inputMap = getVariantInputMap(rowEl);
+          const touchedFilters = getActiveVariantFilters(rowEl);
           if (!inputMap) {
             return;
           }
-          if (changedField !== "colour") {
+          if (changedField !== "colour" && !touchedFilters.has("colour")) {
             const value = uniqueValueForKey(candidateRows, "colour");
             if (value && inputMap.colour) {
               inputMap.colour.value = value;
             }
           }
-          if (changedField !== "colour_code") {
+          if (changedField !== "colour_code" && !touchedFilters.has("colour_code")) {
             const value = uniqueValueForKey(candidateRows, "colour_code");
             if (value && inputMap.colour_code) {
               inputMap.colour_code.value = value;
             }
           }
-          if (changedField !== "pantone_number") {
+          if (changedField !== "pantone_number" && !touchedFilters.has("pantone_number")) {
             const value = uniqueValueForKey(candidateRows, "pantone_number");
             if (value && inputMap.pantone_number) {
               inputMap.pantone_number.value = value;
             }
           }
-          if (changedField !== "code") {
+          if (changedField !== "code" && !touchedFilters.has("code")) {
             const value = uniqueValueForKey(candidateRows, "code");
             if (value && inputMap.code) {
               inputMap.code.value = value;
@@ -823,8 +837,10 @@
             return;
           }
           const candidateRows = variantMatches.length ? variantMatches : commonMatches;
+          const variantAutofillRows =
+            variantMatches.length || !activeRow || getActiveVariantFilters(activeRow).size === 0 ? candidateRows : [];
           applyCommonAutofill(candidateRows, changedField);
-          applyVariantAutofill(activeRow, candidateRows, changedField);
+          applyVariantAutofill(activeRow, variantAutofillRows, changedField);
           const refreshed = computeMatches(activeRow);
           updateDatalists(refreshed.commonMatches, refreshed.variantMatches);
         };
@@ -874,13 +890,15 @@
           if (!(target instanceof HTMLInputElement)) {
             return;
           }
-          if (!variantFieldNameMap[target.name]) {
+          const changedField = variantFieldNameMap[target.name];
+          if (!changedField) {
             return;
           }
           const row = target.closest("tr");
           if (!row) {
             return;
           }
+          getActiveVariantFilters(row).add(changedField);
           refresh({ activeRow: row });
         });
 
@@ -897,6 +915,7 @@
           if (!row) {
             return;
           }
+          getActiveVariantFilters(row).add(changedField);
           refresh({ activeRow: row, autofill: true, changedField });
         });
 
