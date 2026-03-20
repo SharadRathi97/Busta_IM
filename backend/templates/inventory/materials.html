@@ -92,11 +92,13 @@
                   <div class="d-flex gap-1 flex-wrap">
                     <form method="post" action="{% url 'inventory:release_production_request' order.id %}" class="reauth-form" data-reauth-label="release raw materials">
                       {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
                       <input type="hidden" name="action_password" value="">
                       <button type="submit" class="btn btn-sm btn-outline-success">Release</button>
                     </form>
                     <form method="post" action="{% url 'inventory:reject_production_request' order.id %}" class="reauth-form" data-reauth-label="reject this production release request" onsubmit="return confirm('Reject and cancel this production order request?');">
                       {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
                       <input type="hidden" name="action_password" value="">
                       <button type="submit" class="btn btn-sm btn-outline-danger">Reject</button>
                     </form>
@@ -179,6 +181,7 @@
                   {% if can_manage %}
                     <form method="post" action="{% url 'inventory:adjust' %}" class="inline-form materials-adjust-form">
                       {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
                       <input type="hidden" name="material_id" value="{{ material.id }}">
                       <input type="number" name="delta" class="form-control form-control-sm" placeholder="+/-" step="0.001" required>
                       <input type="text" name="reason" class="form-control form-control-sm" placeholder="Reason" required>
@@ -191,9 +194,10 @@
                 <td>
                   {% if can_manage %}
                     <div class="row-actions materials-row-actions">
-                      <a class="btn btn-sm btn-outline-secondary" href="{% url 'inventory:edit' material.id %}">Edit</a>
+                      <a class="btn btn-sm btn-outline-secondary" href="{% url 'inventory:edit' material.id %}?next={{ request.get_full_path|urlencode }}">Edit</a>
                       <form method="post" action="{% url 'inventory:delete' material.id %}" onsubmit="return confirm('Delete this raw material?');">
                         {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
                         <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
                       </form>
                     </div>
@@ -225,6 +229,7 @@
           <div class="modal-body vstack gap-2">
             {% csrf_token %}
             <input type="hidden" name="action" value="upload_csv">
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
             <div class="small text-muted">
               Template downloads when you click Upload CSV. You can also download it again below.
             </div>
@@ -257,6 +262,7 @@
           <div class="modal-body vstack gap-3">
             {% csrf_token %}
             <input type="hidden" name="action" value="create_material">
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
             <div class="row g-2">
               <div class="col-12 col-md-6">
                 <label class="form-label">{{ create_form.name.label }}</label>

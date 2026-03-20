@@ -13,7 +13,8 @@ from django.db.models import F, Min, Q, Value
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import get_object_or_404, redirect, render, resolve_url
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods
 
 from accounts.permissions import INVENTORY_MANAGE_ROLES, INVENTORY_VIEW_ROLES, require_roles, verify_action_password
@@ -95,6 +96,31 @@ def _build_sort_state(active_sort: str, active_direction: str):
         icon = "↑" if is_active and active_direction == "asc" else "↓" if is_active else "↕"
         state[key] = {"active": is_active, "next": next_direction, "icon": icon}
     return state
+
+
+def _get_safe_next_url(request) -> str:
+    next_url = (request.POST.get("next") or request.GET.get("next") or "").strip()
+    if not next_url:
+        return ""
+    if url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return ""
+
+
+def _redirect_to_next_or_list(request, default_url_name: str):
+    next_url = _get_safe_next_url(request)
+    if next_url:
+        return redirect(next_url)
+
+    default_url = resolve_url(default_url_name)
+    query_string = request.META.get("QUERY_STRING", "").strip()
+    if query_string:
+        return redirect(f"{default_url}?{query_string}")
+    return redirect(default_url)
 
 
 def _distinct_text_suggestions(field_name: str, *, limit: int = 120) -> list[str]:
@@ -552,9 +578,9 @@ def material_list(request):
                                     opening_stock=row_form.cleaned_data["opening_stock"],
                                     reorder_level=row_form.cleaned_data["reorder_level"],
                                     created_by=request.user,
-                                )
+                        )
                         messages.success(request, f"Raw material rows processed for {len(row_forms)} colour variant(s).")
-                        return redirect("inventory:list")
+                        return _redirect_to_next_or_list(request, "inventory:list")
                     except ValueError as exc:
                         messages.error(request, str(exc))
                         show_create_modal = True
@@ -584,7 +610,7 @@ def material_list(request):
                             created_by=request.user,
                         )
                         messages.success(request, "Raw material created.")
-                        return redirect("inventory:list")
+                        return _redirect_to_next_or_list(request, "inventory:list")
                     except ValueError as exc:
                         create_form.add_error("vendor", str(exc))
                 else:
@@ -597,7 +623,7 @@ def material_list(request):
                     rows = _read_csv_rows(csv_form.cleaned_data["csv_file"])
                     imported_count = _import_raw_materials_from_rows(rows, created_by=request.user)
                     messages.success(request, f"Raw material CSV imported. Processed rows: {imported_count}.")
-                    return redirect("inventory:list")
+                    return _redirect_to_next_or_list(request, "inventory:list")
                 except ValidationError as exc:
                     errors = exc.messages if hasattr(exc, "messages") else [str(exc)]
                     for error in errors[:8]:
@@ -727,6 +753,7 @@ def material_edit(request, material_id: int):
         "reorder_level": material.reorder_level,
     }
     form = RawMaterialUpdateForm(request.POST or None, material=material, initial=initial)
+    next_url = _get_safe_next_url(request) or resolve_url("inventory:list")
 
     if request.method == "POST" and form.is_valid():
         try:
@@ -746,13 +773,14 @@ def material_edit(request, material_id: int):
                 reorder_level=form.cleaned_data["reorder_level"],
             )
             messages.success(request, "Raw material updated.")
-            return redirect("inventory:list")
+            return _redirect_to_next_or_list(request, "inventory:list")
         except ValueError as exc:
             form.add_error("vendor", str(exc))
 
     context = {
         "form": form,
         "material": material,
+        "next_url": next_url,
         "material_autocomplete": _build_raw_material_autocomplete(),
         "material_autofill_rows": _build_raw_material_autofill_rows(),
     }
@@ -782,7 +810,7 @@ def material_delete(request, material_id: int):
         protected_labels = sorted({obj._meta.verbose_name for obj in exc.protected_objects})
         linked_text = f" Linked records: {', '.join(protected_labels)}." if protected_labels else ""
         messages.error(request, f"Raw material cannot be deleted because it is linked to existing records.{linked_text}")
-    return redirect("inventory:list")
+    return _redirect_to_next_or_list(request, "inventory:list")
 
 
 @login_required
@@ -800,7 +828,7 @@ def adjust_material_stock(request):
     form = StockAdjustmentForm(request.POST)
     if not form.is_valid():
         messages.error(request, "Invalid stock adjustment input.")
-        return redirect("inventory:list")
+        return _redirect_to_next_or_list(request, "inventory:list")
 
     material = get_object_or_404(RawMaterial, pk=form.cleaned_data["material_id"])
     try:
@@ -813,7 +841,7 @@ def adjust_material_stock(request):
         messages.success(request, "Stock adjusted.")
     except ValueError as exc:
         messages.error(request, str(exc))
-    return redirect("inventory:list")
+    return _redirect_to_next_or_list(request, "inventory:list")
 
 
 @login_required
@@ -828,7 +856,7 @@ def release_production_request(request, order_id: int):
     if denied:
         return denied
     if not verify_action_password(request, action_label="release raw materials"):
-        return redirect("inventory:list")
+        return _redirect_to_next_or_list(request, "inventory:list")
 
     order = get_object_or_404(ProductionOrder, pk=order_id)
     try:
@@ -843,7 +871,7 @@ def release_production_request(request, order_id: int):
     except ValidationError as exc:
         message = exc.messages[0] if hasattr(exc, "messages") and exc.messages else str(exc)
         messages.error(request, message)
-    return redirect("inventory:list")
+    return _redirect_to_next_or_list(request, "inventory:list")
 
 
 @login_required
@@ -858,7 +886,7 @@ def reject_production_request(request, order_id: int):
     if denied:
         return denied
     if not verify_action_password(request, action_label="reject this production release request"):
-        return redirect("inventory:list")
+        return _redirect_to_next_or_list(request, "inventory:list")
 
     order = get_object_or_404(ProductionOrder, pk=order_id)
     try:
@@ -870,7 +898,7 @@ def reject_production_request(request, order_id: int):
     except ValidationError as exc:
         message = exc.messages[0] if hasattr(exc, "messages") and exc.messages else str(exc)
         messages.error(request, message)
-    return redirect("inventory:list")
+    return _redirect_to_next_or_list(request, "inventory:list")
 
 
 @login_required
@@ -968,7 +996,7 @@ def mro_list(request):
                         created_by=request.user,
                     )
                     messages.success(request, "MRO item created.")
-                    return redirect("inventory:mro_list")
+                    return _redirect_to_next_or_list(request, "inventory:mro_list")
                 except ValueError as exc:
                     create_form.add_error("vendor", str(exc))
             show_create_modal = True
@@ -1059,6 +1087,7 @@ def mro_edit(request, item_id: int):
         "reorder_level": item.reorder_level,
     }
     form = MROItemUpdateForm(request.POST or None, item=item, initial=initial)
+    next_url = _get_safe_next_url(request) or resolve_url("inventory:mro_list")
 
     if request.method == "POST" and form.is_valid():
         try:
@@ -1075,13 +1104,14 @@ def mro_edit(request, item_id: int):
                 reorder_level=form.cleaned_data["reorder_level"],
             )
             messages.success(request, "MRO item updated.")
-            return redirect("inventory:mro_list")
+            return _redirect_to_next_or_list(request, "inventory:mro_list")
         except ValueError as exc:
             form.add_error("vendor", str(exc))
 
     context = {
         "form": form,
         "item": item,
+        "next_url": next_url,
     }
     return render(request, "inventory/mro_item_edit.html", context)
 
@@ -1106,7 +1136,7 @@ def mro_delete(request, item_id: int):
         protected_labels = sorted({obj._meta.verbose_name for obj in exc.protected_objects})
         linked_text = f" Linked records: {', '.join(protected_labels)}." if protected_labels else ""
         messages.error(request, f"MRO item cannot be deleted because it is linked to existing records.{linked_text}")
-    return redirect("inventory:mro_list")
+    return _redirect_to_next_or_list(request, "inventory:mro_list")
 
 
 @login_required
@@ -1124,7 +1154,7 @@ def adjust_mro_item_stock(request):
     form = MROStockAdjustmentForm(request.POST)
     if not form.is_valid():
         messages.error(request, "Invalid stock adjustment input.")
-        return redirect("inventory:mro_list")
+        return _redirect_to_next_or_list(request, "inventory:mro_list")
 
     item = get_object_or_404(MROItem, pk=form.cleaned_data["item_id"])
     try:
@@ -1137,4 +1167,4 @@ def adjust_mro_item_stock(request):
         messages.success(request, "MRO stock adjusted.")
     except ValueError as exc:
         messages.error(request, str(exc))
-    return redirect("inventory:mro_list")
+    return _redirect_to_next_or_list(request, "inventory:mro_list")

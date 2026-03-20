@@ -3,7 +3,7 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h1 class="h4 mb-0">Edit MRO Item</h1>
-  <a class="btn btn-outline-secondary btn-sm" href="{% url 'inventory:mro_list' %}">Back</a>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ next_url }}">Back</a>
 </div>
 
 <div class="card card-soft">
@@ -13,6 +13,7 @@
     </div>
     <form method="post" class="vstack gap-2">
       {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next_url }}">
       {% for field in form %}
         <div>
           <label class="form-label">{{ field.label }}</label>
@@ -26,7 +27,7 @@
       {% endif %}
       <div class="d-flex gap-2">
         <button class="btn btn-primary" type="submit">Save Changes</button>
-        <a class="btn btn-outline-secondary" href="{% url 'inventory:mro_list' %}">Cancel</a>
+        <a class="btn btn-outline-secondary" href="{{ next_url }}">Cancel</a>
       </div>
     </form>
   </div>

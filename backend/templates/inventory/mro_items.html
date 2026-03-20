@@ -93,6 +93,7 @@
                   {% if can_manage %}
                     <form method="post" action="{% url 'inventory:mro_adjust' %}" class="inline-form">
                       {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
                       <input type="hidden" name="item_id" value="{{ item.id }}">
                       <input type="number" name="delta" class="form-control form-control-sm" placeholder="+/-" step="0.001" required>
                       <input type="text" name="reason" class="form-control form-control-sm" placeholder="Reason" required>
@@ -105,9 +106,10 @@
                 <td>
                   {% if can_manage %}
                     <div class="row-actions">
-                      <a class="btn btn-sm btn-outline-secondary" href="{% url 'inventory:mro_edit' item.id %}">Edit</a>
+                      <a class="btn btn-sm btn-outline-secondary" href="{% url 'inventory:mro_edit' item.id %}?next={{ request.get_full_path|urlencode }}">Edit</a>
                       <form method="post" action="{% url 'inventory:mro_delete' item.id %}" onsubmit="return confirm('Delete this MRO item?');">
                         {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
                         <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
                       </form>
                     </div>
@@ -139,6 +141,7 @@
           <div class="modal-body vstack gap-2">
             {% csrf_token %}
             <input type="hidden" name="action" value="create_mro_item">
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
             <div class="row g-2">
               <div class="col-12 col-md-6">
                 <label class="form-label">{{ create_form.name.label }}</label>

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from urllib.parse import quote
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -87,6 +88,83 @@ class RawMaterialCostTests(TestCase):
         self.assertContains(response, 'data-auto-fit-columns="true"')
         self.assertContains(response, "materials-adjust-form")
         self.assertContains(response, "materials-row-actions")
+
+    def test_raw_material_create_redirect_preserves_active_filters(self):
+        self.client.force_login(self.user)
+        next_url = f"{reverse('inventory:list')}?q=Canvas"
+
+        response = self.client.post(
+            next_url,
+            {
+                "action": "create_material",
+                "name": "Canvas Roll",
+                "rm_id": "RMID-CANVAS-010",
+                "code": "RM-CANVAS-010",
+                "material_type": RawMaterial.MaterialType.FABRIC,
+                "colour": "Blue",
+                "colour_code": "BLU",
+                "unit": RawMaterial.Unit.METER,
+                "cost_per_unit": "22.500",
+                "vendor": str(self.vendor.id),
+                "opening_stock": "40.000",
+                "reorder_level": "8.000",
+            },
+        )
+
+        self.assertRedirects(response, next_url)
+
+    def test_raw_material_edit_and_adjust_preserve_active_filters(self):
+        self.client.force_login(self.user)
+        material = RawMaterial.objects.create(
+            name="Filter Retain Fabric",
+            rm_id="RMID-FILTER-001",
+            code="RM-FILTER-001",
+            material_type=RawMaterial.MaterialType.FABRIC,
+            colour="Grey",
+            colour_code="GRY",
+            unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("18.500"),
+            current_stock=Decimal("12.000"),
+            reorder_level=Decimal("4.000"),
+            vendor=self.vendor,
+        )
+        next_url = f"{reverse('inventory:list')}?q=Filter"
+
+        edit_page = self.client.get(
+            f"{reverse('inventory:edit', args=[material.id])}?next={quote(next_url, safe='')}"
+        )
+        self.assertEqual(edit_page.status_code, 200)
+        self.assertContains(edit_page, f'href="{next_url}"')
+
+        update_response = self.client.post(
+            reverse("inventory:edit", args=[material.id]),
+            {
+                "next": next_url,
+                "name": "Filter Retain Fabric Updated",
+                "rm_id": "RMID-FILTER-001",
+                "code": "RM-FILTER-001",
+                "material_type": RawMaterial.MaterialType.FABRIC,
+                "colour": "Grey",
+                "colour_code": "GRY",
+                "pantone_number": "",
+                "unit": RawMaterial.Unit.METER,
+                "cost_per_unit": "19.000",
+                "vendor": str(self.vendor.id),
+                "reorder_level": "5.000",
+            },
+        )
+        self.assertRedirects(update_response, next_url)
+
+        adjust_response = self.client.post(
+            reverse("inventory:adjust"),
+            {
+                "next": next_url,
+                "material_id": material.id,
+                "delta": "1.000",
+                "reason": "Cycle count correction",
+            },
+        )
+        self.assertRedirects(adjust_response, next_url)
 
     def test_raw_material_create_modal_includes_autofill_dataset(self):
         self.client.force_login(self.user)
@@ -935,6 +1013,34 @@ class MROInventoryFlowTests(TestCase):
                 quantity=Decimal("2.000"),
             ).exists()
         )
+
+    def test_adjust_mro_stock_preserves_active_filters(self):
+        item = MROItem.objects.create(
+            name="Filter Retain Gloves",
+            mro_id="MRO-FILTER-001",
+            code="GLOVES-F",
+            item_type=MROItem.ItemType.OTHER,
+            unit=MROItem.Unit.PIECES,
+            cost_per_unit=Decimal("55.000"),
+            current_stock=Decimal("10.000"),
+            reorder_level=Decimal("3.000"),
+            location="Consumables Bay",
+            vendor=self.vendor,
+        )
+        self.client.force_login(self.user)
+        next_url = f"{reverse('inventory:mro_list')}?q=Filter"
+
+        response = self.client.post(
+            reverse("inventory:mro_adjust"),
+            {
+                "next": next_url,
+                "item_id": item.id,
+                "delta": "-1.000",
+                "reason": "Issued to maintenance",
+            },
+        )
+
+        self.assertRedirects(response, next_url)
 
 
 class ProductionRMRequestInventoryActionTests(TestCase):
