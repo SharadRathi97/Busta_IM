@@ -65,6 +65,29 @@ class RawMaterialCostTests(TestCase):
         self.assertContains(response, "vendor colour code")
         self.assertContains(response, "Pantone Number")
 
+    def test_raw_material_list_uses_auto_fit_table_markup(self):
+        self.client.force_login(self.user)
+        RawMaterial.objects.create(
+            name="Auto Fit Canvas",
+            rm_id="RMID-AUTO-FIT-001",
+            code="RMID-AUTO-FIT-001-BLK",
+            material_type=RawMaterial.MaterialType.FABRIC,
+            colour="Black",
+            colour_code="BLK",
+            unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("28.000"),
+            current_stock=Decimal("18.000"),
+            reorder_level=Decimal("5.000"),
+            vendor=self.vendor,
+        )
+        response = self.client.get(reverse("inventory:list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="materialsInventoryTable"')
+        self.assertContains(response, 'data-auto-fit-columns="true"')
+        self.assertContains(response, "materials-adjust-form")
+        self.assertContains(response, "materials-row-actions")
+
     def test_raw_material_create_modal_includes_autofill_dataset(self):
         self.client.force_login(self.user)
         RawMaterial.objects.create(

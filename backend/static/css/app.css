@@ -121,6 +121,28 @@ canvas {
   background: #f8fafc;
 }
 
+.materials-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.materials-table thead th,
+.materials-table tbody td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.materials-table .sort-link {
+  display: block;
+}
+
+.materials-table .badge-soft {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+}
+
 .table-col-separators thead th:not(:last-child),
 .table-col-separators tbody td:not(:last-child) {
   border-right: 1px solid #f1f5f9;
@@ -228,6 +250,32 @@ canvas {
 
 .inline-form .btn {
   white-space: nowrap;
+}
+
+.materials-adjust-form,
+.materials-row-actions {
+  display: grid;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.materials-adjust-form .form-control,
+.materials-adjust-form .form-select,
+.materials-adjust-form .btn,
+.materials-row-actions .btn,
+.materials-row-actions form,
+.materials-row-actions form .btn {
+  width: 100%;
+  min-width: 0;
+}
+
+.materials-adjust-form .btn,
+.materials-row-actions .btn {
+  white-space: normal;
+}
+
+.materials-row-actions form {
+  margin: 0;
 }
 
 .row-actions {

@@ -121,7 +121,27 @@
     </div>
     <div class="table-shell">
       <div class="table-responsive">
-        <table class="table table-sm table-minimal table-col-separators align-middle">
+        <table
+          id="materialsInventoryTable"
+          class="table table-sm table-minimal table-col-separators align-middle materials-table"
+          data-auto-fit-columns="true"
+        >
+          <colgroup>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+          </colgroup>
           <thead>
             <tr>
               <th><a class="sort-link {% if sort_state.id.active %}active{% endif %}" href="{% replace_query request sort='id' direction=sort_state.id.next page='' %}">ID {{ sort_state.id.icon }}</a></th>
@@ -157,7 +177,7 @@
                 <td>{{ material.supplier_names }}</td>
                 <td>
                   {% if can_manage %}
-                    <form method="post" action="{% url 'inventory:adjust' %}" class="inline-form">
+                    <form method="post" action="{% url 'inventory:adjust' %}" class="inline-form materials-adjust-form">
                       {% csrf_token %}
                       <input type="hidden" name="material_id" value="{{ material.id }}">
                       <input type="number" name="delta" class="form-control form-control-sm" placeholder="+/-" step="0.001" required>
@@ -170,7 +190,7 @@
                 </td>
                 <td>
                   {% if can_manage %}
-                    <div class="row-actions">
+                    <div class="row-actions materials-row-actions">
                       <a class="btn btn-sm btn-outline-secondary" href="{% url 'inventory:edit' material.id %}">Edit</a>
                       <form method="post" action="{% url 'inventory:delete' material.id %}" onsubmit="return confirm('Delete this raw material?');">
                         {% csrf_token %}
@@ -354,6 +374,80 @@
 {% endblock %}
 
 {% block scripts %}
+  <script>
+    (() => {
+      const table = document.getElementById("materialsInventoryTable");
+      if (!table) {
+        return;
+      }
+
+      const cols = Array.from(table.querySelectorAll("colgroup col"));
+      const container = table.closest(".table-responsive");
+      const columnConfig = [
+        { min: 4, max: 5, padding: 1 },
+        { min: 8, max: 12, padding: 1 },
+        { min: 11, max: 18, padding: 2 },
+        { min: 8, max: 14, padding: 2 },
+        { min: 8, max: 11, padding: 1 },
+        { min: 8, max: 12, padding: 2 },
+        { min: 10, max: 15, padding: 2 },
+        { min: 10, max: 16, padding: 2 },
+        { min: 8, max: 11, padding: 1 },
+        { min: 8, max: 11, padding: 1 },
+        { min: 8, max: 11, padding: 1 },
+        { min: 10, max: 18, padding: 2 },
+        { min: 10, max: 12, padding: 1 },
+        { min: 8, max: 10, padding: 1 },
+      ];
+
+      if (!container || cols.length !== columnConfig.length) {
+        return;
+      }
+
+      const extractTextLength = (cell) => {
+        const text = String(cell?.innerText || cell?.textContent || "")
+          .replace(/\s+/g, " ")
+          .trim();
+        return text.length;
+      };
+
+      const applyColumnWidths = () => {
+        const weights = columnConfig.map((config, index) => {
+          const cells = Array.from(table.querySelectorAll(`tr > :nth-child(${index + 1})`));
+          const longestText = cells.reduce((longest, cell) => Math.max(longest, extractTextLength(cell)), 0);
+          return Math.max(config.min, Math.min(config.max, longestText + config.padding));
+        });
+        const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+        if (!totalWeight) {
+          return;
+        }
+        cols.forEach((col, index) => {
+          col.style.width = `${(weights[index] / totalWeight) * 100}%`;
+        });
+      };
+
+      let resizeFrame = null;
+      const scheduleColumnFit = () => {
+        if (resizeFrame !== null) {
+          window.cancelAnimationFrame(resizeFrame);
+        }
+        resizeFrame = window.requestAnimationFrame(() => {
+          applyColumnWidths();
+          resizeFrame = null;
+        });
+      };
+
+      scheduleColumnFit();
+      window.addEventListener("load", scheduleColumnFit);
+      window.addEventListener("resize", scheduleColumnFit, { passive: true });
+
+      if (window.ResizeObserver) {
+        const resizeObserver = new window.ResizeObserver(scheduleColumnFit);
+        resizeObserver.observe(container);
+      }
+    })();
+  </script>
+
   {% if can_manage %}
     <script>
       (() => {
