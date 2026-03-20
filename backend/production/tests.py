@@ -403,6 +403,17 @@ class ProductBOMActionTests(TestCase):
         self.assertFalse(ProductionOrder.objects.filter(id=completed_order.id).exists())
         self.assertContains(response, "Removed 2 cancelled/completed production order(s)")
 
+    def test_delete_finished_product_missing_id_redirects_with_message(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("production:delete_product", args=[999999]),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Selected item no longer exists.")
+
     def test_bulk_add_bom_items_creates_multiple_rows(self):
         self.client.force_login(self.user)
 

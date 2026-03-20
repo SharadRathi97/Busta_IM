@@ -522,7 +522,10 @@ def delete_finished_product(request, product_id: int):
     if denied:
         return denied
 
-    product = get_object_or_404(FinishedProduct.objects.only("id", "name", "sku", "item_type"), pk=product_id)
+    product = FinishedProduct.objects.only("id", "name", "sku", "item_type").filter(pk=product_id).first()
+    if not product:
+        messages.error(request, "Selected item no longer exists.")
+        return redirect("production:products")
     product_label = f"{product.name} ({product.sku})"
     item_label = "Part" if product.item_type == FinishedProduct.ItemType.PART else "Finished product"
     allowed_terminal_statuses = [
