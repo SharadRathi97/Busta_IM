@@ -1,15 +1,37 @@
 from __future__ import annotations
 
+from io import BytesIO
+from pathlib import Path
 from decimal import Decimal, InvalidOperation
+from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
+from PIL import Image, ImageOps
 
 from inventory.models import InventoryLedger, RawMaterial
+
+
+FINISHED_PRODUCT_IMAGE_SIZE = (512, 512)
+SUPPORTED_PRODUCT_IMAGE_FORMATS = {
+    ".jpg": "JPEG",
+    ".jpeg": "JPEG",
+    ".png": "PNG",
+    ".webp": "WEBP",
+}
+IMAGE_RESAMPLING = getattr(Image, "Resampling", Image).LANCZOS
+
+
+def finished_product_image_upload_path(instance, filename: str) -> str:
+    extension = Path(filename or "").suffix.lower()
+    if extension not in SUPPORTED_PRODUCT_IMAGE_FORMATS:
+        extension = ".png"
+    return f"finished_products/{uuid4().hex}{extension}"
 
 
 class FinishedProduct(models.Model):
@@ -21,6 +43,7 @@ class FinishedProduct(models.Model):
     sku = models.CharField(max_length=50, unique=True)
     item_type = models.CharField(max_length=16, choices=ItemType.choices, default=ItemType.FINISHED)
     colour = models.CharField(max_length=80, blank=True)
+    product_image = models.ImageField(blank=True, upload_to=finished_product_image_upload_path)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -31,9 +54,77 @@ class FinishedProduct(models.Model):
             return f"{self.name} [{self.colour}] ({self.sku})"
         return f"{self.name} ({self.sku})"
 
+    def save(self, *args, **kwargs):
+        old_image_name = None
+        if self.pk:
+            old_image_name = type(self).objects.filter(pk=self.pk).values_list("product_image", flat=True).first() or None
+
+        super().save(*args, **kwargs)
+
+        if self.product_image:
+            self._resize_product_image()
+
+        if old_image_name and old_image_name != self.product_image.name:
+            storage = self._meta.get_field("product_image").storage
+            if storage.exists(old_image_name):
+                storage.delete(old_image_name)
+
+    def delete(self, *args, **kwargs):
+        image_name = self.product_image.name if self.product_image else ""
+        storage = self._meta.get_field("product_image").storage
+        super().delete(*args, **kwargs)
+        if image_name and storage.exists(image_name):
+            storage.delete(image_name)
+
     @property
     def is_part(self) -> bool:
         return self.item_type == self.ItemType.PART
+
+    def _resize_product_image(self):
+        if not self.product_image:
+            return
+
+        image_name = self.product_image.name
+        output_format = SUPPORTED_PRODUCT_IMAGE_FORMATS.get(Path(image_name).suffix.lower(), "PNG")
+
+        with self.product_image.open("rb") as image_file:
+            with Image.open(image_file) as source_image:
+                normalized = ImageOps.exif_transpose(source_image)
+                if normalized.mode not in {"RGB", "RGBA"}:
+                    normalized = normalized.convert("RGBA")
+
+                contained = ImageOps.contain(normalized, FINISHED_PRODUCT_IMAGE_SIZE, IMAGE_RESAMPLING)
+                canvas = Image.new("RGB", FINISHED_PRODUCT_IMAGE_SIZE, "#ffffff")
+                offset = (
+                    (FINISHED_PRODUCT_IMAGE_SIZE[0] - contained.width) // 2,
+                    (FINISHED_PRODUCT_IMAGE_SIZE[1] - contained.height) // 2,
+                )
+                paste_image = contained if contained.mode == "RGBA" else contained.convert("RGB")
+                if paste_image.mode == "RGBA":
+                    canvas.paste(paste_image, offset, paste_image)
+                else:
+                    canvas.paste(paste_image, offset)
+
+        output = BytesIO()
+        save_kwargs: dict[str, object] = {}
+        if output_format == "PNG":
+            save_kwargs["optimize"] = True
+        elif output_format == "JPEG":
+            save_kwargs.update({"quality": 90, "optimize": True})
+        elif output_format == "WEBP":
+            save_kwargs.update({"quality": 90, "method": 6})
+        canvas.save(output, format=output_format, **save_kwargs)
+        output.seek(0)
+        output_bytes = output.getvalue()
+
+        storage = self.product_image.storage
+        if storage.exists(image_name):
+            with storage.open(image_name, "wb") as image_file:
+                image_file.write(output_bytes)
+            return
+
+        self.product_image.save(image_name, ContentFile(output_bytes), save=False)
+        super().save(update_fields=["product_image"])
 
 
 class BOMItem(models.Model):

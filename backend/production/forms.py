@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 
 from inventory.models import RawMaterial
 
-from .models import BOMItem, FinishedProduct, ProductionOrder
+from .models import BOMItem, FINISHED_PRODUCT_IMAGE_SIZE, FinishedProduct, ProductionOrder
 
 
 def _raw_material_base_label(material: RawMaterial) -> str:
@@ -168,9 +168,15 @@ def build_bom_component_catalog(
 
 
 class FinishedProductForm(forms.ModelForm):
+    product_image = forms.ImageField(
+        required=False,
+        help_text=f"Optional. Uploaded image will be resized to {FINISHED_PRODUCT_IMAGE_SIZE[0]} x {FINISHED_PRODUCT_IMAGE_SIZE[1]} px.",
+        widget=forms.ClearableFileInput(attrs={"class": "form-control", "accept": "image/*"}),
+    )
+
     class Meta:
         model = FinishedProduct
-        fields = ["name", "sku", "colour", "item_type"]
+        fields = ["name", "sku", "product_image", "colour", "item_type"]
         widgets = {
             "name": forms.TextInput(attrs={"class": "form-control"}),
             "sku": forms.TextInput(attrs={"class": "form-control"}),

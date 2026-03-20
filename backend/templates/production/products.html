@@ -30,6 +30,7 @@
           <thead>
             <tr>
               <th>ID</th>
+              <th>Image</th>
               <th>Name</th>
               <th>Colour</th>
               <th>SKU</th>
@@ -41,6 +42,13 @@
             {% for p in products %}
               <tr>
                 <td>{{ p.id }}</td>
+                <td class="product-thumb-cell">
+                  {% if p.product_image %}
+                    <img src="{{ p.product_image.url }}" alt="{{ p.name }}" class="product-thumb">
+                  {% else %}
+                    <span class="product-thumb-placeholder">No image</span>
+                  {% endif %}
+                </td>
                 <td>
                   <button class="btn btn-link btn-sm p-0 align-baseline text-start" type="button" data-bs-toggle="modal" data-bs-target="#bomModal{{ p.id }}">
                     {{ p.name }}
@@ -59,7 +67,7 @@
                 {% endif %}
               </tr>
             {% empty %}
-              <tr><td colspan="{% if can_manage %}5{% else %}4{% endif %}">No finished products found.</td></tr>
+              <tr><td colspan="{% if can_manage %}7{% else %}6{% endif %}">No finished products found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -122,7 +130,7 @@
           <h2 class="modal-title h5 mb-0" id="addFinishedProductModalLabel">Add Finished Product</h2>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <form method="post">
+        <form method="post" enctype="multipart/form-data">
           <div class="modal-body vstack gap-2">
             {% csrf_token %}
             <input type="hidden" name="action" value="add_product">
@@ -136,6 +144,12 @@
               <label class="form-label">{{ product_form.sku.label }}</label>
               {{ product_form.sku }}
               {% for error in product_form.sku.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            <div>
+              <label class="form-label">{{ product_form.product_image.label }}</label>
+              {{ product_form.product_image }}
+              {% if product_form.product_image.help_text %}<div class="form-help">{{ product_form.product_image.help_text }}</div>{% endif %}
+              {% for error in product_form.product_image.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
             </div>
             {% for error in product_form.non_field_errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
           </div>

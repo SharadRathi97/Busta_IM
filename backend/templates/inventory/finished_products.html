@@ -21,6 +21,7 @@
           <thead>
             <tr>
               <th>ID</th>
+              <th>Image</th>
               <th>Product Name</th>
               <th>SKU</th>
               <th>Current Stock</th>
@@ -30,12 +31,19 @@
             {% for item in items %}
               <tr>
                 <td>{{ item.id }}</td>
+                <td class="product-thumb-cell">
+                  {% if item.product_image %}
+                    <img src="{{ item.product_image.url }}" alt="{{ item.name }}" class="product-thumb">
+                  {% else %}
+                    <span class="product-thumb-placeholder">No image</span>
+                  {% endif %}
+                </td>
                 <td>{{ item.name }}</td>
                 <td>{{ item.sku }}</td>
                 <td>{{ item.current_stock|floatformat:3 }}</td>
               </tr>
             {% empty %}
-              <tr><td colspan="4">No finished products found.</td></tr>
+              <tr><td colspan="5">No finished products found.</td></tr>
             {% endfor %}
           </tbody>
         </table>

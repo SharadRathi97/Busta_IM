@@ -5,6 +5,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from django.db import IntegrityError
+from django.db.models.fields.files import FieldFile
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.db.utils import OperationalError, ProgrammingError
 from django.dispatch import receiver
@@ -34,6 +35,8 @@ def _is_auditable_model(sender) -> bool:
 
 
 def _serialize_value(value):
+    if isinstance(value, FieldFile):
+        return value.name or ""
     if isinstance(value, (datetime, date, time)):
         return value.isoformat()
     if isinstance(value, (Decimal, UUID)):

@@ -1,9 +1,12 @@
+import tempfile
+from io import BytesIO
 from decimal import Decimal
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
+from PIL import Image
 
 from accounts.models import User
 from inventory.models import InventoryLedger, RawMaterial
@@ -11,6 +14,7 @@ from partners.models import Partner
 
 from .models import (
     BOMItem,
+    FINISHED_PRODUCT_IMAGE_SIZE,
     FinishedProduct,
     FinishedStock,
     FinishedStockLedger,
@@ -23,6 +27,12 @@ from .models import (
     reject_raw_materials_for_production_order,
     release_raw_materials_for_production_order,
 )
+
+
+def _make_test_image_file(name: str = "product.png", *, size: tuple[int, int] = (900, 500), color: str = "navy"):
+    buffer = BytesIO()
+    Image.new("RGB", size, color).save(buffer, format="PNG")
+    return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/png")
 
 
 class ProductionOrderFlowTests(TestCase):
@@ -567,6 +577,47 @@ class ProductBOMActionTests(TestCase):
         created = FinishedProduct.objects.get(sku="PT-PAD")
         self.assertEqual(created.item_type, FinishedProduct.ItemType.PART)
         self.assertEqual(created.colour, "Navy")
+
+    def test_add_finished_product_with_image_resizes_upload(self):
+        self.client.force_login(self.user)
+        upload = _make_test_image_file()
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with self.settings(MEDIA_ROOT=media_root):
+                response = self.client.post(
+                    reverse("production:products"),
+                    {
+                        "action": "add_product",
+                        "prod-name": "Photo Tote",
+                        "prod-sku": "FP-PHOTO",
+                        "prod-item_type": FinishedProduct.ItemType.FINISHED,
+                        "prod-product_image": upload,
+                    },
+                )
+
+                self.assertRedirects(response, reverse("production:products"))
+                created = FinishedProduct.objects.get(sku="FP-PHOTO")
+                self.assertTrue(created.product_image.name.startswith("finished_products/"))
+                with Image.open(created.product_image.path) as saved_image:
+                    self.assertEqual(saved_image.size, FINISHED_PRODUCT_IMAGE_SIZE)
+
+    def test_products_page_shows_finished_product_image_column(self):
+        self.client.force_login(self.user)
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with self.settings(MEDIA_ROOT=media_root):
+                self.product.product_image = _make_test_image_file(name="existing-product.png")
+                self.product.save()
+
+                response = self.client.get(reverse("production:products"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<th>Image</th>", html=True)
+        self.assertContains(response, self.product.product_image.url)
+        self.assertContains(response, "product-thumb")
+        content = response.content.decode("utf-8")
+        finished_products_section = content.split("<h2 class=\"h5\">Finished Products</h2>", 1)[1]
+        self.assertLess(finished_products_section.index("<th>ID</th>"), finished_products_section.index("<th>Image</th>"))
 
     def test_export_product_bom_excel(self):
         self.client.force_login(self.user)

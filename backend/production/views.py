@@ -260,11 +260,13 @@ def product_bom_page(request):
     action = request.POST.get("action") if request.method == "POST" else None
     product_form = FinishedProductForm(
         request.POST if action == "add_product" else None,
+        request.FILES if action == "add_product" else None,
         prefix="prod",
         initial={"item_type": FinishedProduct.ItemType.FINISHED},
     )
     part_form = FinishedProductForm(
         request.POST if action == "add_part" else None,
+        request.FILES if action == "add_part" else None,
         prefix="part",
         initial={"item_type": FinishedProduct.ItemType.PART},
     )

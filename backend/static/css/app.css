@@ -176,6 +176,37 @@ canvas {
   font-weight: 600;
 }
 
+.product-thumb-cell {
+  width: 72px;
+}
+
+.product-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  display: block;
+  border-radius: 0.55rem;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 0.25rem;
+}
+
+.product-thumb-placeholder {
+  width: 56px;
+  height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0.25rem;
+  border-radius: 0.55rem;
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.68rem;
+  line-height: 1.1;
+}
+
 .low-stock {
   background-color: #fff1f2;
 }

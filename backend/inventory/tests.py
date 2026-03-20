@@ -1,15 +1,24 @@
+import tempfile
+from io import BytesIO
 from decimal import Decimal
 from urllib.parse import quote
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
+from PIL import Image
 
 from accounts.models import User
 from partners.models import Partner
 from production.models import BOMItem, FinishedProduct, ProductionOrder, create_production_order_with_rm_request
 
 from .models import MROInventoryLedger, MROItem, RawMaterial, RawMaterialVendor
+
+
+def _make_test_image_file(name: str = "finished-product.png", *, size: tuple[int, int] = (720, 480), color: str = "teal"):
+    buffer = BytesIO()
+    Image.new("RGB", size, color).save(buffer, format="PNG")
+    return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/png")
 
 
 class RawMaterialCostTests(TestCase):
@@ -1171,3 +1180,32 @@ class ProductionRMRequestInventoryActionTests(TestCase):
         self.assertEqual(order.status, ProductionOrder.Status.AWAITING_RM_RELEASE)
         self.assertFalse(order.raw_material_released)
         self.assertEqual(self.material.current_stock, Decimal("50.000"))
+
+
+class FinishedProductsInventoryTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="finished_admin",
+            password="test12345",
+            role=User.Role.ADMIN,
+        )
+
+    def test_finished_products_list_shows_image_thumbnail_column(self):
+        self.client.force_login(self.user)
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with self.settings(MEDIA_ROOT=media_root):
+                product = FinishedProduct.objects.create(
+                    name="Showcase Tote",
+                    sku="FP-SHOWCASE",
+                    product_image=_make_test_image_file(),
+                )
+
+                response = self.client.get(reverse("inventory:finished_products_list"))
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "<th>Image</th>", html=True)
+                self.assertContains(response, product.product_image.url)
+                self.assertContains(response, "product-thumb")
+                content = response.content.decode("utf-8")
+                self.assertLess(content.index("<th>ID</th>"), content.index("<th>Image</th>"))
