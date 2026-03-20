@@ -10,6 +10,7 @@ from pathlib import Path
 from .env import env_list, load_dotenv, parse_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = BASE_DIR.parent
 load_dotenv(os.getenv("DJANGO_DOTENV_PATH", str(BASE_DIR / ".env")))
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-change-this-in-production")
@@ -87,7 +88,7 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "/static/"
-STATICFILES_DIRS = [BASE_DIR / "static"]
+STATICFILES_DIRS = [BASE_DIR / "static", PROJECT_ROOT / "assets"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
