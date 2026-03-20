@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .env import env_list, load_dotenv, parse_database_url
+from .env import env_bool, env_list, load_dotenv, parse_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BASE_DIR.parent
@@ -92,6 +92,7 @@ STATICFILES_DIRS = [BASE_DIR / "static", PROJECT_ROOT / "assets"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+SERVE_MEDIA = env_bool("DJANGO_SERVE_MEDIA", default=False)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

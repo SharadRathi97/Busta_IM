@@ -10,6 +10,7 @@ from .env import env_bool, env_list
 from .settings_base import *  # noqa: F401,F403
 
 DEBUG = False
+SERVE_MEDIA = env_bool("DJANGO_SERVE_MEDIA", default=True)
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", default=[])
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS", default=[])
 

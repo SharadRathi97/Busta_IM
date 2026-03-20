@@ -335,6 +335,7 @@ Edit:
 
 1. `server_name yourdomain.com www.yourdomain.com;`
 2. Keep static alias as `/opt/busta_im/backend/staticfiles/`
+3. Add media alias as `/opt/busta_im/backend/media/` so uploaded product images are served
 3. Keep proxy target as `127.0.0.1:8001`
 
 Enable config:
@@ -405,6 +406,13 @@ python manage.py migrate
 python manage.py collectstatic --noinput
 sudo systemctl restart busta-im
 sudo systemctl reload nginx
+
+For uploaded files, ensure the media directory exists on the server and is writable by the app user:
+
+```bash
+mkdir -p /opt/busta_im/backend/media
+sudo chown -R www-data:www-data /opt/busta_im/backend/media
+```
 ```
 
 ## 22. Backup and Restore Database
