@@ -49,6 +49,7 @@ class DashboardRecentTransactionsTests(TestCase):
             quantity=Decimal("5.000"),
             unit=self.material.unit,
             reason="Opening stock",
+            invoice_number="INV-DASH-001",
             reference_type="opening_stock",
             reference_id=self.material.id,
             created_by=self.actor,
@@ -60,6 +61,8 @@ class DashboardRecentTransactionsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "User")
+        self.assertContains(response, "Invoice")
+        self.assertContains(response, "INV-DASH-001")
         self.assertContains(response, "Inventory Actor")
 
     def test_admin_login_shows_low_stock_modal_once(self):

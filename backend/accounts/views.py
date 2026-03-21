@@ -37,6 +37,24 @@ AUDIT_EXPORTS = {
 }
 
 
+def _extract_invoice_number(details: object) -> str:
+    if not isinstance(details, dict):
+        return ""
+
+    fields = details.get("fields")
+    if isinstance(fields, dict):
+        invoice_number = fields.get("invoice_number")
+        return str(invoice_number or "")
+
+    changes = details.get("changes")
+    if isinstance(changes, dict):
+        invoice_change = changes.get("invoice_number")
+        if isinstance(invoice_change, dict):
+            return str(invoice_change.get("to") or invoice_change.get("from") or "")
+
+    return ""
+
+
 @require_http_methods(["GET", "POST"])
 def login_view(request):
     if request.user.is_authenticated:
@@ -143,6 +161,7 @@ def download_transaction_history(request, scope: str):
             "table",
             "record_pk",
             "record_repr",
+            "invoice_number",
             "details_json",
         ]
     )
@@ -162,6 +181,7 @@ def download_transaction_history(request, scope: str):
                 log.table_name,
                 log.object_pk,
                 log.object_repr,
+                _extract_invoice_number(log.details),
                 json.dumps(log.details, ensure_ascii=True, separators=(",", ":"), default=str),
             ]
         )

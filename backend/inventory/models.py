@@ -111,6 +111,7 @@ class InventoryLedger(models.Model):
     quantity = models.DecimalField(max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))])
     unit = models.CharField(max_length=16)
     reason = models.CharField(max_length=255)
+    invoice_number = models.CharField(max_length=100, blank=True)
     reference_type = models.CharField(max_length=50, blank=True)
     reference_id = models.PositiveIntegerField(null=True, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
@@ -271,6 +272,7 @@ def create_raw_material_with_opening_stock(
     opening_stock: Decimal,
     reorder_level: Decimal,
     created_by,
+    invoice_number: str = "",
 ) -> RawMaterial:
     if vendor.partner_type not in {Partner.PartnerType.SUPPLIER, Partner.PartnerType.BOTH}:
         raise ValueError("Selected partner is not a supplier.")
@@ -287,6 +289,7 @@ def create_raw_material_with_opening_stock(
     resolved_code = code.strip().upper() or (
         f"{resolved_rm_id}-{resolved_variant_identifier}" if resolved_rm_id and resolved_variant_identifier else ""
     )
+    resolved_invoice_number = invoice_number.strip()
     if not resolved_rm_id:
         raise ValueError("RM ID is required.")
     if not resolved_variant_identifier:
@@ -333,8 +336,9 @@ def create_raw_material_with_opening_stock(
                     txn_type=InventoryLedger.TxnType.IN,
                     quantity=opening_stock,
                     unit=existing_material.unit,
-                    reason="Opening stock",
-                    reference_type="opening_stock",
+                    reason="Additional stock",
+                    invoice_number=resolved_invoice_number,
+                    reference_type="stock_addition",
                     reference_id=existing_material.id,
                     created_by=created_by,
                 )
@@ -365,6 +369,7 @@ def create_raw_material_with_opening_stock(
                 quantity=opening_stock,
                 unit=material.unit,
                 reason="Opening stock",
+                invoice_number=resolved_invoice_number,
                 reference_type="opening_stock",
                 reference_id=material.id,
                 created_by=created_by,

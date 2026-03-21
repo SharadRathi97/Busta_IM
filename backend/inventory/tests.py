@@ -12,7 +12,7 @@ from accounts.models import User
 from partners.models import Partner
 from production.models import BOMItem, FinishedProduct, ProductionOrder, create_production_order_with_rm_request
 
-from .models import MROInventoryLedger, MROItem, RawMaterial, RawMaterialVendor
+from .models import InventoryLedger, MROInventoryLedger, MROItem, RawMaterial, RawMaterialVendor
 
 
 def _make_test_image_file(name: str = "finished-product.png", *, size: tuple[int, int] = (720, 480), color: str = "teal"):
@@ -66,6 +66,32 @@ class RawMaterialCostTests(TestCase):
         list_response = self.client.get(reverse("inventory:list"))
         self.assertContains(list_response, "12.500")
         self.assertContains(list_response, "Black")
+
+    def test_create_raw_material_records_invoice_number_on_opening_stock_transaction(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("inventory:list"),
+            {
+                "name": "Invoice Strap",
+                "rm_id": "RMID-INV-001",
+                "code": "RM-INV-001",
+                "material_type": RawMaterial.MaterialType.ACCESSORY,
+                "colour": "Black",
+                "colour_code": "BLK",
+                "unit": RawMaterial.Unit.METER,
+                "cost_per_unit": "9.500",
+                "vendor": str(self.vendor.id),
+                "invoice_number": "INV-2026-001",
+                "opening_stock": "12.000",
+                "reorder_level": "3.000",
+            },
+        )
+
+        self.assertRedirects(response, reverse("inventory:list"))
+        material = RawMaterial.objects.get(rm_id="RMID-INV-001")
+        ledger_entry = InventoryLedger.objects.get(material=material, reference_type="opening_stock")
+        self.assertEqual(ledger_entry.invoice_number, "INV-2026-001")
 
     def test_raw_material_list_shows_vendor_colour_code_and_pantone_columns(self):
         self.client.force_login(self.user)
@@ -444,6 +470,45 @@ class RawMaterialCostTests(TestCase):
         self.assertEqual(material.cost_per_unit, Decimal("44.000"))
         self.assertEqual(material.current_stock, Decimal("15.000"))
         self.assertEqual(material.code, "RMID-CANVAS-002-BLU")
+
+    def test_create_material_merge_existing_variant_records_additional_stock_transaction(self):
+        self.client.force_login(self.user)
+        material = RawMaterial.objects.create(
+            name="Existing Canvas",
+            rm_id="RMID-CANVAS-003",
+            code="RMID-CANVAS-003-BLU",
+            material_type=RawMaterial.MaterialType.FABRIC,
+            colour="Blue",
+            colour_code="BLU",
+            unit=RawMaterial.Unit.METER,
+            cost_per_unit=Decimal("40.000"),
+            current_stock=Decimal("10.000"),
+            reorder_level=Decimal("2.000"),
+            vendor=self.vendor,
+        )
+
+        response = self.client.post(
+            reverse("inventory:list"),
+            {
+                "action": "create_material",
+                "name": "Existing Canvas",
+                "rm_id": "RMID-CANVAS-003",
+                "material_type": RawMaterial.MaterialType.FABRIC,
+                "unit": RawMaterial.Unit.METER,
+                "cost_per_unit": "52.000",
+                "vendor": str(self.vendor.id),
+                "reorder_level": "5.000",
+                "variant_colour": ["Blue"],
+                "variant_colour_code": ["BLU"],
+                "variant_pantone_number": [""],
+                "variant_code": ["RMID-CANVAS-003-BLU"],
+                "variant_opening_stock": ["5.000"],
+            },
+        )
+
+        self.assertRedirects(response, reverse("inventory:list"))
+        ledger_entry = InventoryLedger.objects.get(material=material, reference_type="stock_addition")
+        self.assertEqual(ledger_entry.reason, "Additional stock")
 
     def test_create_material_merges_duplicate_rm_id_and_colour_code_with_different_code(self):
         self.client.force_login(self.user)

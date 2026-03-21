@@ -7,7 +7,7 @@ from io import StringIO
 from django.test import TestCase
 from django.urls import reverse
 
-from inventory.models import RawMaterial
+from inventory.models import InventoryLedger, RawMaterial
 from partners.models import Partner
 from production.models import BOMItem, FinishedProduct, ProductionOrder, cancel_production_order, create_production_order_and_deduct_stock
 
@@ -98,6 +98,25 @@ class TransactionHistoryExportTests(TestCase):
         self.assertTrue(any(row["app"] == "inventory" for row in raw_rows))
         self.assertFalse(any(row["app"] == "partners" for row in raw_rows))
         self.assertTrue(any(row["app"] == "partners" for row in all_rows))
+
+    def test_raw_material_transaction_export_includes_invoice_number(self):
+        InventoryLedger.objects.create(
+            material=self.material,
+            txn_type=InventoryLedger.TxnType.IN,
+            quantity=Decimal("10.000"),
+            unit=self.material.unit,
+            reason="Opening stock",
+            invoice_number="INV-ADMIN-001",
+            reference_type="opening_stock",
+            reference_id=self.material.id,
+            created_by=self.admin,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("accounts:download_transactions", args=["raw_materials"]))
+        rows = self._csv_rows(response)
+
+        self.assertTrue(any(row["invoice_number"] == "INV-ADMIN-001" for row in rows))
 
     def test_finished_product_delete_logs_cascaded_production_order_deletes(self):
         cancelled_order = create_production_order_and_deduct_stock(

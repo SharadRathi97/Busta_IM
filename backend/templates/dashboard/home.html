@@ -118,6 +118,7 @@
                 <th>Type</th>
                 <th>Quantity</th>
                 <th>Reason</th>
+                <th>Invoice</th>
                 <th>User</th>
               </tr>
             </thead>
@@ -129,10 +130,11 @@
                   <td>{{ row.txn_type }}</td>
                   <td>{{ row.quantity }} {{ row.unit }}</td>
                   <td>{{ row.reason }}</td>
+                  <td>{{ row.invoice_number|default:"-" }}</td>
                   <td>{% if row.created_by %}{{ row.created_by.get_full_name|default:row.created_by.username }}{% else %}-{% endif %}</td>
                 </tr>
               {% empty %}
-                <tr><td colspan="6">No transactions recorded yet.</td></tr>
+                <tr><td colspan="7">No transactions recorded yet.</td></tr>
               {% endfor %}
             </tbody>
           </table>

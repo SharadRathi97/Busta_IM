@@ -388,6 +388,7 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
             "cost_per_unit": row.get("cost_per_unit", ""),
             "vendor": str(vendor.id),
             "additional_vendors": [str(vendor_obj.id) for vendor_obj in additional_vendors],
+            "invoice_number": "",
             "opening_stock": row.get("opening_stock", ""),
             "reorder_level": row.get("reorder_level", ""),
         }
@@ -443,6 +444,7 @@ def _import_raw_materials_from_rows(rows: list[dict[str, str]], created_by):
                     opening_stock=payload["opening_stock"],
                     reorder_level=payload["reorder_level"],
                     created_by=created_by,
+                    invoice_number="",
                 )
             except ValueError as exc:
                 processing_errors.append(f"Row {payload['row_number']}: {exc}")
@@ -525,6 +527,7 @@ def material_list(request):
                     "cost_per_unit": (request.POST.get("cost_per_unit") or "").strip(),
                     "vendor": (request.POST.get("vendor") or "").strip(),
                     "additional_vendors": request.POST.getlist("additional_vendors"),
+                    "invoice_number": (request.POST.get("invoice_number") or "").strip(),
                     "reorder_level": (request.POST.get("reorder_level") or "").strip(),
                 }
 
@@ -578,6 +581,7 @@ def material_list(request):
                                     opening_stock=row_form.cleaned_data["opening_stock"],
                                     reorder_level=row_form.cleaned_data["reorder_level"],
                                     created_by=request.user,
+                                    invoice_number=row_form.cleaned_data["invoice_number"],
                         )
                         messages.success(request, f"Raw material rows processed for {len(row_forms)} colour variant(s).")
                         return _redirect_to_next_or_list(request, "inventory:list")
@@ -608,6 +612,7 @@ def material_list(request):
                             opening_stock=create_form.cleaned_data["opening_stock"],
                             reorder_level=create_form.cleaned_data["reorder_level"],
                             created_by=request.user,
+                            invoice_number=create_form.cleaned_data["invoice_number"],
                         )
                         messages.success(request, "Raw material created.")
                         return _redirect_to_next_or_list(request, "inventory:list")

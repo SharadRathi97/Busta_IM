@@ -146,6 +146,12 @@ class RawMaterialBaseForm(forms.Form):
 
 
 class RawMaterialCreateForm(RawMaterialBaseForm):
+    invoice_number = forms.CharField(
+        max_length=100,
+        required=False,
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "Optional"}),
+        help_text="Optional. Captured on the opening stock transaction only.",
+    )
     opening_stock = forms.DecimalField(
         min_value=Decimal("0"),
         decimal_places=3,
@@ -155,6 +161,7 @@ class RawMaterialCreateForm(RawMaterialBaseForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["invoice_number"].widget.attrs["autocomplete"] = "off"
         self.fields["opening_stock"].widget.attrs["list"] = "rmOpeningStockSuggestions"
 
 
