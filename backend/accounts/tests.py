@@ -4,6 +4,7 @@ import csv
 from decimal import Decimal
 from io import StringIO
 
+from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 
@@ -173,6 +174,41 @@ class TransactionHistoryExportTests(TestCase):
                 and row["username"] == self.admin.username
                 for row in rows
             )
+        )
+
+
+class SessionTimeoutTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="session_timeout_user",
+            password="test12345",
+            role=User.Role.VIEWER,
+        )
+
+    def test_session_uses_30_minute_sliding_timeout(self):
+        login_response = self.client.post(
+            reverse("accounts:login"),
+            {
+                "username": self.user.username,
+                "password": "test12345",
+            },
+        )
+
+        self.assertEqual(login_response.status_code, 302)
+        self.assertEqual(settings.SESSION_COOKIE_AGE, 1800)
+        self.assertTrue(settings.SESSION_SAVE_EVERY_REQUEST)
+        self.assertEqual(self.client.session.get_expiry_age(), settings.SESSION_COOKIE_AGE)
+        self.assertEqual(
+            int(login_response.cookies[settings.SESSION_COOKIE_NAME]["max-age"]),
+            settings.SESSION_COOKIE_AGE,
+        )
+
+        dashboard_response = self.client.get(reverse("dashboard:home"))
+
+        self.assertEqual(dashboard_response.status_code, 200)
+        self.assertEqual(
+            int(dashboard_response.cookies[settings.SESSION_COOKIE_NAME]["max-age"]),
+            settings.SESSION_COOKIE_AGE,
         )
 
 

@@ -414,6 +414,42 @@ class ProductBOMActionTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Selected item no longer exists.")
 
+    def test_add_bom_item_from_product_modal_creates_mapping(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("production:products"),
+            {
+                "action": "add_bom",
+                "open_bom": str(self.product.id),
+                "bom-product": str(self.product.id),
+                "bom-component": f"raw:{self.material_b.id}",
+                "bom-qty_per_unit": "0.750",
+            },
+        )
+
+        self.assertRedirects(response, f"{reverse('production:products')}?open_bom={self.product.id}")
+        self.assertTrue(BOMItem.objects.filter(product=self.product, material=self.material_b).exists())
+
+    def test_add_bom_item_from_product_modal_reopens_on_validation_error(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("production:products"),
+            {
+                "action": "add_bom",
+                "open_bom": str(self.product.id),
+                "bom-product": str(self.product.id),
+                "bom-component": f"raw:{self.material_a.id}",
+                "bom-qty_per_unit": "0.700",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["open_bom_id"], self.product.id)
+        self.assertContains(response, "This BOM mapping already exists.")
+        self.assertEqual(BOMItem.objects.count(), 1)
+
     def test_bulk_add_bom_items_creates_multiple_rows(self):
         self.client.force_login(self.user)
 

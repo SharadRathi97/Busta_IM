@@ -305,18 +305,31 @@ def product_bom_page(request):
                 return redirect("production:products")
             show_add_part_modal = True
 
-        if action == "add_bom" and bom_form.is_valid():
-            try:
-                BOMItem.objects.create(
-                    product=bom_form.cleaned_data["product"],
-                    material=bom_form.cleaned_data["material"],
-                    part=bom_form.cleaned_data["part"],
-                    qty_per_unit=bom_form.cleaned_data["qty_per_unit"],
-                )
-                messages.success(request, "BOM item added.")
-                return _redirect_products(bom_form.cleaned_data["product"].id)
-            except IntegrityError:
-                bom_form.add_error(None, "This BOM mapping already exists.")
+        if action == "add_bom":
+            if bom_form.is_valid():
+                try:
+                    BOMItem.objects.create(
+                        product=bom_form.cleaned_data["product"],
+                        material=bom_form.cleaned_data["material"],
+                        part=bom_form.cleaned_data["part"],
+                        qty_per_unit=bom_form.cleaned_data["qty_per_unit"],
+                    )
+                    messages.success(request, "BOM item added.")
+                    return _redirect_products(bom_form.cleaned_data["product"].id)
+                except IntegrityError:
+                    messages.error(request, "This BOM mapping already exists.")
+            else:
+                field_labels = {
+                    "product": "target",
+                    "component": "component",
+                    "qty_per_unit": "quantity",
+                }
+                for field_name, field_errors in bom_form.errors.items():
+                    for field_error in field_errors:
+                        if field_name == "__all__":
+                            messages.error(request, field_error)
+                        else:
+                            messages.error(request, f"{field_labels.get(field_name, field_name)}: {field_error}")
 
         if action == "add_bom_bulk":
             bom_bulk_rows = _extract_bom_bulk_rows(request.POST)
@@ -413,7 +426,7 @@ def product_bom_page(request):
                     messages.error(request, f"CSV: {error}")
             show_upload_csv_modal = True
 
-    open_bom_raw = (request.GET.get("open_bom") or "").strip()
+    open_bom_raw = (request.POST.get("open_bom") or request.GET.get("open_bom") or "").strip()
     open_bom_id = int(open_bom_raw) if open_bom_raw.isdigit() else None
     catalog_items = list(
         FinishedProduct.objects.prefetch_related("bom_items__material", "bom_items__part").order_by("item_type", "name")

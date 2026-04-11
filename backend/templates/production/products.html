@@ -360,6 +360,37 @@
           {% else %}
             <div class="text-muted">No BOM mappings defined for this item.</div>
           {% endif %}
+          {% if can_manage %}
+            <div class="border-top mt-3 pt-3">
+              <h3 class="h6 mb-2">Add BOM Item</h3>
+              <form method="post" class="row g-2 align-items-end">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="add_bom">
+                <input type="hidden" name="open_bom" value="{{ p.id }}">
+                <input type="hidden" name="bom-product" value="{{ p.id }}">
+                <div class="col-12 col-lg-7">
+                  <label class="form-label mb-1" for="addBomComponent{{ p.id }}">Component</label>
+                  <select class="form-select form-select-sm" id="addBomComponent{{ p.id }}" name="bom-component" {% if p.available_bom_components %}required{% else %}disabled{% endif %}>
+                    {% if p.available_bom_components %}
+                      <option value="">Select component</option>
+                      {% for value, label in p.available_bom_components %}
+                        <option value="{{ value }}">{{ label }}</option>
+                      {% endfor %}
+                    {% else %}
+                      <option value="">No available components</option>
+                    {% endif %}
+                  </select>
+                </div>
+                <div class="col-12 col-sm-6 col-lg-3">
+                  <label class="form-label mb-1" for="addBomQty{{ p.id }}">Qty / Unit</label>
+                  <input class="form-control form-control-sm" id="addBomQty{{ p.id }}" type="number" name="bom-qty_per_unit" min="0.001" step="0.001" {% if p.available_bom_components %}required{% else %}disabled{% endif %}>
+                </div>
+                <div class="col-12 col-sm-6 col-lg-2">
+                  <button class="btn btn-sm btn-primary w-100" type="submit" {% if not p.available_bom_components %}disabled{% endif %}>Add Item</button>
+                </div>
+              </form>
+            </div>
+          {% endif %}
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
