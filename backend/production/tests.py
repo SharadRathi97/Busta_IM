@@ -431,6 +431,17 @@ class ProductBOMActionTests(TestCase):
         self.assertRedirects(response, f"{reverse('production:products')}?open_bom={self.product.id}")
         self.assertTrue(BOMItem.objects.filter(product=self.product, material=self.material_b).exists())
 
+    def test_add_bom_item_form_uses_component_typeahead(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("production:products"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-add-bom-form")
+        self.assertContains(response, "data-component-typeahead")
+        self.assertContains(response, f"addBomComponentOptions{self.product.id}")
+        self.assertContains(response, f'data-value="raw:{self.material_b.id}"')
+
     def test_add_bom_item_from_product_modal_reopens_on_validation_error(self):
         self.client.force_login(self.user)
 
