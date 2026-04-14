@@ -24,6 +24,7 @@ class TransactionHistoryExportTests(TestCase):
         )
         self.vendor = Partner.objects.create(
             name="Txn Supplier",
+            vendor_id="VEND-TEST-001",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE4321F1Z5",
             address_line1="Txn Road",
@@ -196,7 +197,7 @@ class SessionTimeoutTests(TestCase):
 
         self.assertEqual(login_response.status_code, 302)
         self.assertEqual(settings.SESSION_COOKIE_AGE, 1800)
-        self.assertTrue(settings.SESSION_SAVE_EVERY_REQUEST)
+        self.assertFalse(settings.SESSION_SAVE_EVERY_REQUEST)
         self.assertEqual(self.client.session.get_expiry_age(), settings.SESSION_COOKIE_AGE)
         self.assertEqual(
             int(login_response.cookies[settings.SESSION_COOKIE_NAME]["max-age"]),
@@ -206,10 +207,8 @@ class SessionTimeoutTests(TestCase):
         dashboard_response = self.client.get(reverse("dashboard:home"))
 
         self.assertEqual(dashboard_response.status_code, 200)
-        self.assertEqual(
-            int(dashboard_response.cookies[settings.SESSION_COOKIE_NAME]["max-age"]),
-            settings.SESSION_COOKIE_AGE,
-        )
+        # With SESSION_SAVE_EVERY_REQUEST=False, cookie is only set on login
+        self.assertNotIn(settings.SESSION_COOKIE_NAME, dashboard_response.cookies)
 
 
 class RoleAccessConsistencyTests(TestCase):

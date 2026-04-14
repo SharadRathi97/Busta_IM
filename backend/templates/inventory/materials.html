@@ -65,7 +65,7 @@
           <thead>
             <tr>
               <th>Order</th>
-              <th>Product</th>
+              <th>Target</th>
               <th>Planned Qty</th>
               <th>Requested By</th>
               <th>Requested At</th>
@@ -77,7 +77,7 @@
             {% for order in pending_production_requests %}
               <tr>
                 <td>#{{ order.id }}</td>
-                <td>{{ order.product.name }}</td>
+                <td>{{ order.target_display }}</td>
                 <td>{{ order.planned_qty|floatformat:3 }}</td>
                 <td>{{ order.created_by.username|default:'-' }}</td>
                 <td>{{ order.created_at|date:'Y-m-d H:i' }}</td>
@@ -456,34 +456,72 @@
       if (window.ResizeObserver) {
         const resizeObserver = new window.ResizeObserver(scheduleColumnFit);
         resizeObserver.observe(container);
+        window.addEventListener("pagehide", () => resizeObserver.disconnect(), { once: true });
       }
     })();
   </script>
 
   {% if can_manage %}
+    <div class="modal fade" id="reauthModal" tabindex="-1" aria-labelledby="reauthModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="reauthModalLabel">Confirm Action</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <p id="reauthModalMessage" class="mb-2">Enter your password to continue.</p>
+            <input type="password" class="form-control" id="reauthModalPassword" placeholder="Password" autocomplete="current-password">
+            <div id="reauthModalError" class="text-danger small mt-1 d-none">Password is required.</div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-primary btn-sm" id="reauthModalConfirm">Confirm</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <script>
       (() => {
-        const forms = document.querySelectorAll(".reauth-form");
-        forms.forEach((form) => {
+        const modalEl = document.getElementById("reauthModal");
+        if (!modalEl || !window.bootstrap) return;
+        const modal = new window.bootstrap.Modal(modalEl);
+        const passwordInput = document.getElementById("reauthModalPassword");
+        const errorDiv = document.getElementById("reauthModalError");
+        const messageEl = document.getElementById("reauthModalMessage");
+        const confirmBtn = document.getElementById("reauthModalConfirm");
+        let pendingForm = null;
+
+        document.querySelectorAll(".reauth-form").forEach((form) => {
           form.addEventListener("submit", (event) => {
+            event.preventDefault();
+            pendingForm = form;
             const actionLabel = form.dataset.reauthLabel || "complete this action";
-            const password = window.prompt(`Enter your password to ${actionLabel}:`);
-            if (password === null) {
-              event.preventDefault();
-              return;
-            }
-            if (!password.trim()) {
-              window.alert("Password is required for this action.");
-              event.preventDefault();
-              return;
-            }
-            const input = form.querySelector('input[name="action_password"]');
-            if (!input) {
-              event.preventDefault();
-              return;
-            }
-            input.value = password;
+            messageEl.textContent = `Enter your password to ${actionLabel}:`;
+            passwordInput.value = "";
+            errorDiv.classList.add("d-none");
+            modal.show();
+            modalEl.addEventListener("shown.bs.modal", () => passwordInput.focus(), { once: true });
           });
+        });
+
+        confirmBtn.addEventListener("click", () => {
+          if (!passwordInput.value.trim()) {
+            errorDiv.classList.remove("d-none");
+            passwordInput.focus();
+            return;
+          }
+          if (pendingForm) {
+            const input = pendingForm.querySelector('input[name="action_password"]');
+            if (input) input.value = passwordInput.value;
+            modal.hide();
+            pendingForm.submit();
+            pendingForm = null;
+          }
+        });
+
+        passwordInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") confirmBtn.click();
         });
       })();
     </script>

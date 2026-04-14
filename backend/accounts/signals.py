@@ -4,6 +4,8 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import UUID
 
+import logging
+
 from django.db import IntegrityError
 from django.db.models.fields.files import FieldFile
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
@@ -12,6 +14,8 @@ from django.dispatch import receiver
 
 from .audit_context import get_audit_actor
 from .models import AuditLog
+
+logger = logging.getLogger(__name__)
 
 
 AUDITED_APP_LABELS = {
@@ -63,7 +67,8 @@ def _snapshot_instance(instance) -> dict[str, object]:
 def _object_repr(instance) -> str:
     try:
         return str(instance)
-    except Exception:
+    except (AttributeError, TypeError, ValueError) as exc:
+        logger.warning("Failed to get repr for %s pk=%s: %s", type(instance).__name__, instance.pk, exc)
         return ""
 
 

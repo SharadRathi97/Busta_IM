@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape
+
+logger = logging.getLogger(__name__)
 
 from django.conf import settings
 from openpyxl import Workbook
@@ -123,7 +126,8 @@ def _load_signature_image(path: Path, *, max_width_mm: float, max_height_mm: flo
             return Spacer(1, max_height)
         scale = min(max_width / source_width, max_height / source_height)
         return RLImage(str(path), width=source_width * scale, height=source_height * scale)
-    except Exception:
+    except (OSError, ValueError) as exc:
+        logger.warning("Failed to load signature image %s: %s", path, exc)
         return Spacer(1, max_height)
 
 

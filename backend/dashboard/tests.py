@@ -24,6 +24,7 @@ class DashboardRecentTransactionsTests(TestCase):
         )
         self.vendor = Partner.objects.create(
             name="Dashboard Supplier",
+            vendor_id="VEND-TEST-001",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE1234F1Z5",
             address_line1="Warehouse Street",

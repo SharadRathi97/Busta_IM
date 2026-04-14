@@ -39,6 +39,7 @@ class PurchasingFlowTests(TestCase):
         )
         self.vendor_a = Partner.objects.create(
             name="Supplier A",
+            vendor_id="VEND-TEST-001",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE1234F1Z5",
             address_line1="Area 1",
@@ -48,6 +49,7 @@ class PurchasingFlowTests(TestCase):
         )
         self.vendor_b = Partner.objects.create(
             name="Supplier B",
+            vendor_id="VEND-TEST-002",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="27ABCDE1234F1Z1",
             address_line1="Area 2",
@@ -358,6 +360,7 @@ class PurchasingFlowTests(TestCase):
     def test_create_purchase_order_allows_material_linked_as_additional_vendor(self):
         vendor_c = Partner.objects.create(
             name="Supplier C",
+            vendor_id="VEND-TEST-003",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="24ABCDE1234F1Z2",
             address_line1="Area 3",
@@ -424,6 +427,7 @@ class PurchaseOrderApprovalWorkflowTests(TestCase):
         )
         self.vendor = Partner.objects.create(
             name="Approval Supplier",
+            vendor_id="VEND-TEST-004",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE0000F1Z5",
             address_line1="Approval Road",
@@ -584,6 +588,7 @@ class LowStockPlannerOnPurchasingPageTests(TestCase):
         )
         self.vendor_a = Partner.objects.create(
             name="Primary Restock Vendor",
+            vendor_id="VEND-TEST-005",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE9012F1Z5",
             address_line1="Main Road",
@@ -593,6 +598,7 @@ class LowStockPlannerOnPurchasingPageTests(TestCase):
         )
         self.vendor_b = Partner.objects.create(
             name="Alt Restock Vendor",
+            vendor_id="VEND-TEST-006",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE3456F1Z5",
             address_line1="Second Street",
@@ -602,6 +608,7 @@ class LowStockPlannerOnPurchasingPageTests(TestCase):
         )
         self.vendor_c = Partner.objects.create(
             name="Unlinked Vendor",
+            vendor_id="VEND-TEST-007",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE7890F1Z5",
             address_line1="Third Street",

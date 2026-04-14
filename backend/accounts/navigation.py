@@ -91,6 +91,7 @@ NAV_ITEMS: tuple[NavigationLink | NavigationDropdown, ...] = (
             "production:export_bom_",
             "production:update_bom",
             "production:delete_bom",
+            "production:delete_marker",
         ),
         allowed_roles=PRODUCTION_VIEW_ROLES,
     ),
@@ -100,6 +101,7 @@ NAV_ITEMS: tuple[NavigationLink | NavigationDropdown, ...] = (
         active_view_prefixes=(
             "production:orders",
             "production:update_status",
+            "production:complete_marker_order",
             "production:cancel_order",
         ),
         allowed_roles=PRODUCTION_VIEW_ROLES,

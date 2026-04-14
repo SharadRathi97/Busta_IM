@@ -14,7 +14,7 @@ class Partner(models.Model):
         BUYER = "buyer", "Buyer"
         BOTH = "both", "Both"
 
-    vendor_id = models.CharField(max_length=50, unique=True, null=True)
+    vendor_id = models.CharField(max_length=50, unique=True)
     name = models.CharField(max_length=150, unique=True)
     partner_type = models.CharField(max_length=16, choices=PartnerType.choices)
     gst_number = models.CharField(max_length=15, validators=[gst_validator])

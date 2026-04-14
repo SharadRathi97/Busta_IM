@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from datetime import date
+
+logger = logging.getLogger(__name__)
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -73,6 +76,7 @@ def _parse_iso_date(raw_value: str | None) -> date | None:
     try:
         return date.fromisoformat(raw_value)
     except ValueError:
+        logger.warning("Invalid date filter value ignored: %s", raw_value)
         return None
 
 
@@ -270,7 +274,7 @@ def purchase_order_page(request):
             if not selected_vendor:
                 raise ValidationError("Select a vendor before adding line items.")
             lines = parse_purchase_lines(material_ids, quantities, vendor=selected_vendor)
-        except Exception as exc:
+        except (ValidationError, ValueError) as exc:
             form.add_error(None, str(exc))
             lines = []
 
@@ -289,6 +293,7 @@ def purchase_order_page(request):
                 vendor=selected_vendor,
             )
             po_ids = ", ".join(f"#{order.id}" for order in created)
+            logger.info("Purchase order(s) created: %s by user=%s", po_ids, request.user.username)
             messages.success(request, f"Purchase order(s) created: {po_ids}")
             return redirect("purchasing:list")
 
@@ -522,6 +527,7 @@ def approve_purchase_order_inventory_action(request, po_id: int):
     po = get_object_or_404(PurchaseOrder, pk=po_id)
     try:
         approved = approve_purchase_order_inventory(purchase_order=po, approved_by=request.user)
+        logger.info("PO #%d inventory approved by user=%s", approved.id, request.user.username)
         if approved.is_fully_approved:
             messages.success(request, f"Purchase order #{approved.id} fully approved and moved to final list.")
         else:
@@ -552,6 +558,7 @@ def approve_purchase_order_admin_action(request, po_id: int):
     po = get_object_or_404(PurchaseOrder, pk=po_id)
     try:
         approved = approve_purchase_order_admin(purchase_order=po, approved_by=request.user)
+        logger.info("PO #%d admin approved by user=%s", approved.id, request.user.username)
         if approved.is_fully_approved:
             messages.success(request, f"Purchase order #{approved.id} fully approved and moved to final list.")
         else:
@@ -584,6 +591,7 @@ def delete_pending_purchase_order_action(request, po_id: int):
 
     deleted_id = po.id
     po.delete()
+    logger.info("PO #%d deleted from pending approvals by user=%s", deleted_id, request.user.username)
     messages.success(request, f"Purchase order #{deleted_id} deleted from pending approvals.")
     return redirect(_next_url_or_default(request))
 
@@ -614,6 +622,7 @@ def receive_purchase_order_page(request, po_id: int):
                 received_by=request.user,
                 line_quantities=quantities,
             )
+            logger.info("PO #%d received (status=%s) by user=%s", updated.id, updated.status, request.user.username)
             messages.success(request, f"Purchase order #{updated.id} updated to {updated.get_status_display()}.")
             return redirect(_next_url_or_default(request))
         except ValidationError as exc:
@@ -648,6 +657,7 @@ def cancel_purchase_order_action(request, po_id: int):
         return redirect(_next_url_or_default(request))
     try:
         cancel_purchase_order(purchase_order=po, cancelled_by=request.user)
+        logger.info("PO #%d cancelled by user=%s", po.id, request.user.username)
         messages.success(request, f"Purchase order #{po.id} cancelled.")
     except ValidationError as exc:
         error = exc.messages[0] if exc.messages else "Unable to cancel purchase order."

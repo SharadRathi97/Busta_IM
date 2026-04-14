@@ -18,10 +18,15 @@ from .models import (
     FinishedProduct,
     FinishedStock,
     FinishedStockLedger,
+    Marker,
+    MarkerOutput,
+    PartProduction,
     ProductionConsumption,
     ProductionOrder,
     cancel_production_order,
+    complete_marker_production_order,
     complete_production_order,
+    create_marker_production_order_with_rm_request,
     create_production_order_with_rm_request,
     create_production_order_and_deduct_stock,
     reject_raw_materials_for_production_order,
@@ -44,6 +49,7 @@ class ProductionOrderFlowTests(TestCase):
         )
         self.vendor = Partner.objects.create(
             name="Main Supplier",
+            vendor_id="VEND-TEST-001",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE1234F1Z5",
             address_line1="Industrial Area",
@@ -266,6 +272,137 @@ class ProductionOrderFlowTests(TestCase):
         self.assertEqual(self.material.current_stock, Decimal("100.000"))
 
 
+class MarkerProductionFlowTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="marker_admin",
+            password="test12345",
+            role=User.Role.ADMIN,
+        )
+        self.vendor = Partner.objects.create(
+            name="Cutting Supplier",
+            vendor_id="VEND-TEST-002",
+            partner_type=Partner.PartnerType.SUPPLIER,
+            gst_number="29MARKER1234F1Z5",
+            address_line1="Cutting Area",
+            city="Bengaluru",
+            state="Karnataka",
+            pincode="560001",
+        )
+        self.fabric = RawMaterial.objects.create(
+            name="Air Mesh",
+            rm_id="RMID-MESH-001",
+            code="RM-MESH-BLK",
+            material_type=RawMaterial.MaterialType.MESH,
+            colour="Black",
+            colour_code="BLK",
+            unit=RawMaterial.Unit.METER,
+            current_stock=Decimal("100.000"),
+            reorder_level=Decimal("10.000"),
+            vendor=self.vendor,
+        )
+        self.part = FinishedProduct.objects.create(
+            name="Shoulder Pad",
+            sku="PT-SHOULDER-BLK",
+            item_type=FinishedProduct.ItemType.PART,
+            colour="Black",
+        )
+        self.marker = Marker.objects.create(
+            marker_id="MKR-001",
+            material=self.fabric,
+            colour="Black",
+            sku_id="SKU-MKR-001",
+            length_per_layer=Decimal("1.000"),
+            sets_per_layer=Decimal("2.000"),
+        )
+        MarkerOutput.objects.create(
+            marker=self.marker,
+            part=self.part,
+            quantity_per_set=Decimal("2.000"),
+        )
+
+    def test_create_marker_order_requests_planned_fabric_without_deducting_stock(self):
+        order = create_marker_production_order_with_rm_request(
+            marker=self.marker,
+            sets=10,
+            notes="Cut pads",
+            created_by=self.user,
+        )
+
+        self.assertEqual(order.target_type, ProductionOrder.TargetType.MARKER)
+        self.assertEqual(order.status, ProductionOrder.Status.AWAITING_RM_RELEASE)
+        self.assertFalse(order.raw_material_released)
+        consumption = ProductionConsumption.objects.get(production_order=order, material=self.fabric)
+        self.assertEqual(consumption.required_qty, Decimal("5.000"))
+        self.fabric.refresh_from_db()
+        self.assertEqual(self.fabric.current_stock, Decimal("100.000"))
+
+    def test_complete_marker_order_records_cut_and_adds_part_inventory(self):
+        order = create_marker_production_order_with_rm_request(
+            marker=self.marker,
+            sets=10,
+            notes="Cut pads",
+            created_by=self.user,
+        )
+        release_raw_materials_for_production_order(production_order=order, released_by=self.user)
+        self.fabric.refresh_from_db()
+        self.assertEqual(self.fabric.current_stock, Decimal("95.000"))
+
+        completed = complete_marker_production_order(
+            production_order=order,
+            actual_length=Decimal("1.000"),
+            actual_layers=6,
+            actual_sets_per_layer=Decimal("2.000"),
+            total_sets=Decimal("10.000"),
+            actual_fabric_issued=Decimal("6.000"),
+            good_sets=Decimal("9.000"),
+            rejected_sets=Decimal("1.000"),
+            completed_by=self.user,
+        )
+
+        completed.refresh_from_db()
+        self.fabric.refresh_from_db()
+        cut = PartProduction.objects.get(production_order=completed)
+        part_stock = FinishedStock.objects.get(product=self.part)
+
+        self.assertEqual(completed.status, ProductionOrder.Status.COMPLETED)
+        self.assertEqual(completed.produced_qty, Decimal("9.000"))
+        self.assertEqual(completed.scrap_qty, Decimal("1.000"))
+        self.assertEqual(cut.actual_fabric_issued, Decimal("6.000"))
+        self.assertEqual(self.fabric.current_stock, Decimal("94.000"))
+        self.assertEqual(part_stock.current_stock, Decimal("18.000"))
+        self.assertTrue(
+            FinishedStockLedger.objects.filter(
+                product=self.part,
+                reference_type="part_production",
+                reference_id=cut.id,
+                quantity=Decimal("18.000"),
+            ).exists()
+        )
+        consumption = ProductionConsumption.objects.get(production_order=completed, material=self.fabric)
+        self.assertEqual(consumption.required_qty, Decimal("6.000"))
+
+    def test_marker_order_view_creates_rm_request(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("production:orders"),
+            {
+                "order_type": ProductionOrder.TargetType.MARKER,
+                "marker": str(self.marker.id),
+                "quantity": "8",
+                "notes": "UI marker order",
+            },
+        )
+
+        self.assertRedirects(response, reverse("production:orders"))
+        order = ProductionOrder.objects.latest("id")
+        self.assertEqual(order.marker_id, self.marker.id)
+        self.assertEqual(order.target_type, ProductionOrder.TargetType.MARKER)
+        consumption = ProductionConsumption.objects.get(production_order=order, material=self.fabric)
+        self.assertEqual(consumption.required_qty, Decimal("4.000"))
+
+
 class ProductBOMActionTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -275,6 +412,7 @@ class ProductBOMActionTests(TestCase):
         )
         self.vendor = Partner.objects.create(
             name="Aux Supplier",
+            vendor_id="VEND-TEST-003",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="27ABCDE1234F1Z5",
             address_line1="Phase 2",
@@ -495,6 +633,73 @@ class ProductBOMActionTests(TestCase):
         self.assertContains(response, "already exists")
         self.assertEqual(BOMItem.objects.count(), 1)
 
+    def test_add_marker_and_output_part_from_products_page(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("production:products"),
+            {
+                "action": "add_marker",
+                "marker-marker_id": "mkr-sleeve",
+                "marker-material": str(self.material_c.id),
+                "marker-colour": "Black",
+                "marker-sku_id": self.product.sku,
+                "marker-length_per_layer": "1.000",
+                "marker-sets_per_layer": "2.000",
+                "marker_output_part": [str(self.part.id)],
+                "marker_output_qty": ["2.000"],
+            },
+        )
+
+        marker = Marker.objects.get(marker_id="MKR-SLEEVE")
+        self.assertRedirects(response, reverse("production:products"))
+        self.assertTrue(
+            MarkerOutput.objects.filter(
+                marker=marker,
+                part=self.part,
+                quantity_per_set=Decimal("2.000"),
+            ).exists()
+        )
+
+    def test_add_marker_can_create_output_parts_inline(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("production:products"),
+            {
+                "action": "add_marker",
+                "marker-marker_id": "mkr-inline",
+                "marker-material": str(self.material_c.id),
+                "marker-colour": "NA",
+                "marker-sku_id": self.product.sku,
+                "marker-length_per_layer": "1.000",
+                "marker-sets_per_layer": "2.000",
+                "marker_output_part": [str(self.part.id)],
+                "marker_output_qty": ["3.000"],
+            },
+        )
+
+        marker = Marker.objects.get(marker_id="MKR-INLINE")
+        self.assertRedirects(response, reverse("production:products"))
+        self.assertTrue(
+            MarkerOutput.objects.filter(
+                marker=marker,
+                part=self.part,
+                quantity_per_set=Decimal("3.000"),
+            ).exists()
+        )
+
+    def test_add_marker_page_uses_typeahead_catalogs(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("production:products"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "markerMaterialInput")
+        self.assertContains(response, "markerPartSuggestions")
+        self.assertContains(response, "finishedProductSkuSuggestions")
+        self.assertContains(response, "markerMaterialCatalogData")
+
     def test_products_page_context_filters_component_options_per_product(self):
         self.client.force_login(self.user)
 
@@ -607,7 +812,7 @@ class ProductBOMActionTests(TestCase):
             {
                 "action": "add_part",
                 "part-name": "Shoulder Pad",
-                "part-sku": "PT-PAD",
+                "part-sku": self.product.sku,
                 "part-item_type": FinishedProduct.ItemType.PART,
                 "part-colour": "",
             },
@@ -616,7 +821,13 @@ class ProductBOMActionTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Colour is required for parts.")
-        self.assertFalse(FinishedProduct.objects.filter(sku="PT-PAD").exists())
+        self.assertFalse(
+            FinishedProduct.objects.filter(
+                sku=self.product.sku,
+                item_type=FinishedProduct.ItemType.PART,
+                name="Shoulder Pad",
+            ).exists()
+        )
 
     def test_add_part_with_colour_creates_part(self):
         self.client.force_login(self.user)
@@ -625,14 +836,14 @@ class ProductBOMActionTests(TestCase):
             {
                 "action": "add_part",
                 "part-name": "Shoulder Pad",
-                "part-sku": "PT-PAD",
+                "part-sku": self.product.sku,
                 "part-item_type": FinishedProduct.ItemType.PART,
                 "part-colour": "Navy",
             },
         )
 
         self.assertRedirects(response, reverse("production:products"))
-        created = FinishedProduct.objects.get(sku="PT-PAD")
+        created = FinishedProduct.objects.get(sku=self.product.sku, item_type=FinishedProduct.ItemType.PART)
         self.assertEqual(created.item_type, FinishedProduct.ItemType.PART)
         self.assertEqual(created.colour, "Navy")
 
@@ -741,6 +952,7 @@ class ProductionOrderActionViewTests(TestCase):
         )
         self.vendor = Partner.objects.create(
             name="Prod Supplier",
+            vendor_id="VEND-TEST-004",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE5678F1Z5",
             address_line1="Industrial Road",

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import csv
+import logging
 from io import StringIO
+
+logger = logging.getLogger(__name__)
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -15,9 +18,21 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from accounts.permissions import INVENTORY_MANAGE_ROLES, INVENTORY_VIEW_ROLES, require_roles
+from config.view_helpers import build_sort_state, get_sorting
 
 from .forms import PartnerCSVUploadForm, PartnerForm
 from .models import Partner
+
+PARTNER_SORT_MAP = {
+    "vendor_id": "vendor_id",
+    "name": "name",
+    "type": "partner_type",
+    "gstin": "gst_number",
+    "address": "address_line1",
+    "contact": "contact_person",
+    "actions": "id",
+}
+PARTNER_SORT_KEYS = list(PARTNER_SORT_MAP.keys())
 
 
 def _can_manage_partners(user) -> bool:
@@ -32,35 +47,6 @@ def _deny_partner_view(request):
         area="vendors and buyers",
         action="access",
     )
-
-
-def _get_sorting(sort_key: str, direction: str):
-    sort_map = {
-        "vendor_id": "vendor_id",
-        "name": "name",
-        "type": "partner_type",
-        "gstin": "gst_number",
-        "address": "address_line1",
-        "contact": "contact_person",
-        "actions": "id",
-    }
-    resolved_key = sort_key if sort_key in sort_map else "name"
-    resolved_direction = direction if direction in {"asc", "desc"} else "asc"
-    order_field = sort_map[resolved_key]
-    if resolved_direction == "desc":
-        order_field = f"-{order_field}"
-    return resolved_key, resolved_direction, order_field
-
-
-def _build_sort_state(active_sort: str, active_direction: str):
-    keys = ["vendor_id", "name", "type", "gstin", "address", "contact", "actions"]
-    state: dict[str, dict[str, str | bool]] = {}
-    for key in keys:
-        is_active = key == active_sort
-        next_direction = "desc" if is_active and active_direction == "asc" else "asc"
-        icon = "↑" if is_active and active_direction == "asc" else "↓" if is_active else "↕"
-        state[key] = {"active": is_active, "next": next_direction, "icon": icon}
-    return state
 
 
 PARTNER_CSV_COLUMNS = [
@@ -79,7 +65,13 @@ PARTNER_CSV_COLUMNS = [
 ]
 
 
+MAX_CSV_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
 def _read_csv_rows(csv_file):
+    if hasattr(csv_file, "size") and csv_file.size > MAX_CSV_SIZE_BYTES:
+        raise ValidationError("CSV file exceeds the 5 MB size limit.")
+
     try:
         content = csv_file.read().decode("utf-8-sig")
     except UnicodeDecodeError as exc:
@@ -223,9 +215,10 @@ def partner_list_create(request):
                     messages.error(request, f"CSV: {error}")
             show_csv_modal = True
 
-    sort_key, sort_direction, order_field = _get_sorting(
+    sort_key, sort_direction, order_field = get_sorting(
         request.GET.get("sort", ""),
         request.GET.get("direction", ""),
+        PARTNER_SORT_MAP,
     )
 
     q_filter = request.GET.get("q", "").strip()
@@ -262,7 +255,7 @@ def partner_list_create(request):
         "csv_form": csv_form,
         "sort_key": sort_key,
         "sort_direction": sort_direction,
-        "sort_state": _build_sort_state(sort_key, sort_direction),
+        "sort_state": build_sort_state(PARTNER_SORT_KEYS, sort_key, sort_direction),
         "partner_type_choices": Partner.PartnerType.choices,
         "filter_values": {
             "q": q_filter,

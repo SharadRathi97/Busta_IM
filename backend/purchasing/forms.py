@@ -1,3 +1,4 @@
+from datetime import date as date_type
 from decimal import Decimal
 
 from django import forms
@@ -55,6 +56,12 @@ class PurchaseOrderCreateForm(forms.Form):
         self.fields["packaging_ident_terms"].initial = PurchaseOrder.DEFAULT_PACKAGING_IDENT_TERMS
         self.fields["inspection_report_terms"].initial = PurchaseOrder.DEFAULT_INSPECTION_REPORT_TERMS
         self.fields["packing_terms"].initial = PurchaseOrder.DEFAULT_PACKING_TERMS
+
+    def clean_order_date(self):
+        order_date = self.cleaned_data["order_date"]
+        if order_date > date_type.today():
+            raise ValidationError("Order date cannot be in the future.")
+        return order_date
 
 
 class PurchaseLineForm(forms.Form):

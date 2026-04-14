@@ -35,7 +35,10 @@ class RawMaterial(models.Model):
     pantone_number = models.CharField(max_length=50, blank=True, default="")
     unit = models.CharField(max_length=16, choices=Unit.choices)
     cost_per_unit = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
-    current_stock = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
+    current_stock = models.DecimalField(
+        max_digits=12, decimal_places=3, default=Decimal("0"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
     reorder_level = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     vendor = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="materials")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -56,7 +59,11 @@ class RawMaterial(models.Model):
                 fields=["rm_id", "pantone_number"],
                 condition=~Q(pantone_number=""),
                 name="uniq_raw_material_rm_id_pantone_number",
-            )
+            ),
+            models.CheckConstraint(
+                check=Q(current_stock__gte=Decimal("0")),
+                name="raw_material_non_negative_stock",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -141,7 +148,10 @@ class MROItem(models.Model):
     item_type = models.CharField(max_length=32, choices=ItemType.choices, default=ItemType.OTHER)
     unit = models.CharField(max_length=16, choices=Unit.choices, default=Unit.PIECES)
     cost_per_unit = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
-    current_stock = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
+    current_stock = models.DecimalField(
+        max_digits=12, decimal_places=3, default=Decimal("0"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
     reorder_level = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     location = models.CharField(max_length=120, blank=True)
     vendor = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name="mro_items")
@@ -149,6 +159,12 @@ class MROItem(models.Model):
 
     class Meta:
         ordering = ["name", "mro_id"]
+        constraints = [
+            models.CheckConstraint(
+                check=Q(current_stock__gte=Decimal("0")),
+                name="mro_item_non_negative_stock",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.name} ({self.mro_id})"

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import csv
+import logging
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import StringIO
+
+logger = logging.getLogger(__name__)
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -27,18 +30,25 @@ from .forms import (
     BOMItemForm,
     BOMItemUpdateForm,
     FinishedProductForm,
+    MarkerForm,
+    PartProductionCompletionForm,
     ProductionOrderCreateForm,
     ProductionStatusForm,
     build_bom_component_catalog,
     build_bom_component_choices,
+    marker_material_queryset,
 )
 from .models import (
     BOMItem,
     FinishedProduct,
     FinishedStock,
+    Marker,
+    MarkerOutput,
     ProductionOrder,
     cancel_production_order,
+    complete_marker_production_order,
     complete_production_order,
+    create_marker_production_order_with_rm_request,
     create_production_order_with_rm_request,
 )
 
@@ -82,7 +92,10 @@ def _import_bom_from_rows(rows: list[dict[str, str]]):
         product_sku = row.get("product_sku", "").upper()
         material_code = row.get("material_code", "").upper()
 
-        product = FinishedProduct.objects.filter(sku=product_sku).first()
+        product = FinishedProduct.objects.filter(
+            sku=product_sku,
+            item_type=FinishedProduct.ItemType.FINISHED,
+        ).first()
         if not product:
             errors.append(f"Row {row_number}: product_sku '{product_sku}' not found.")
             continue
@@ -196,6 +209,63 @@ def _extract_order_bom_override_map(post_data) -> dict[str, tuple[str, Decimal]]
     return overrides
 
 
+def _extract_marker_output_rows(post_data) -> list[dict[str, str]]:
+    part_values = post_data.getlist("marker_output_part")
+    qty_values = post_data.getlist("marker_output_qty")
+
+    row_count = max(len(part_values), len(qty_values))
+    rows: list[dict[str, str]] = []
+    for index in range(row_count):
+        part_value = (part_values[index] if index < len(part_values) else "").strip()
+        qty_value = (qty_values[index] if index < len(qty_values) else "").strip()
+        if not part_value and not qty_value:
+            continue
+        rows.append({"part": part_value, "quantity_per_set": qty_value})
+    return rows
+
+
+def _validate_marker_output_rows(rows: list[dict[str, str]]) -> list[tuple[FinishedProduct, Decimal]]:
+    outputs: list[tuple[FinishedProduct, Decimal]] = []
+    errors: list[str] = []
+    seen_part_ids: set[int] = set()
+
+    for row_index, row in enumerate(rows, start=1):
+        part_raw = (row.get("part") or "").strip()
+        qty_raw = (row.get("quantity_per_set") or "").strip()
+        if not part_raw or not qty_raw:
+            errors.append(f"Output part row {row_index}: select a part and enter qty per set.")
+            continue
+        if not part_raw.isdigit():
+            errors.append(f"Output part row {row_index}: select a valid part from the suggestions.")
+            continue
+
+        part = FinishedProduct.objects.filter(
+            pk=int(part_raw),
+            item_type=FinishedProduct.ItemType.PART,
+        ).first()
+        if not part:
+            errors.append(f"Output part row {row_index}: selected part is no longer available.")
+            continue
+        if part.id in seen_part_ids:
+            errors.append(f"Output part row {row_index}: duplicate part selected.")
+            continue
+        seen_part_ids.add(part.id)
+
+        try:
+            quantity_per_set = Decimal(qty_raw).quantize(Decimal("0.001"))
+        except (InvalidOperation, ValueError, TypeError):
+            errors.append(f"Output part row {row_index}: enter a valid qty per set.")
+            continue
+        if quantity_per_set <= 0:
+            errors.append(f"Output part row {row_index}: qty per set must be greater than zero.")
+            continue
+        outputs.append((part, quantity_per_set))
+
+    if errors:
+        raise ValidationError(errors)
+    return outputs
+
+
 def _redirect_products(open_bom_id: int | None = None):
     url = reverse("production:products")
     if open_bom_id:
@@ -270,6 +340,7 @@ def product_bom_page(request):
         prefix="part",
         initial={"item_type": FinishedProduct.ItemType.PART},
     )
+    marker_form = MarkerForm(request.POST if action == "add_marker" else None, prefix="marker")
     bom_form = BOMItemForm(request.POST if action == "add_bom" else None, prefix="bom")
     csv_form = BOMCSVUploadForm(
         request.POST if action == "upload_bom_csv" else None,
@@ -279,7 +350,9 @@ def product_bom_page(request):
     show_upload_csv_modal = False
     show_add_product_modal = False
     show_add_part_modal = False
+    show_add_marker_modal = False
     bom_bulk_rows = [{"product": "", "component": "", "qty_per_unit": ""}]
+    marker_output_rows_seed = [{"part": "", "quantity_per_set": ""}]
 
     if request.method == "POST":
         denied = require_roles(
@@ -304,6 +377,33 @@ def product_bom_page(request):
                 messages.success(request, "Part added.")
                 return redirect("production:products")
             show_add_part_modal = True
+
+        if action == "add_marker":
+            marker_output_rows_seed = _extract_marker_output_rows(request.POST) or marker_output_rows_seed
+            if marker_form.is_valid():
+                try:
+                    marker_outputs = _validate_marker_output_rows(_extract_marker_output_rows(request.POST))
+                    with transaction.atomic():
+                        marker = marker_form.save()
+                        MarkerOutput.objects.bulk_create(
+                            [
+                                MarkerOutput(
+                                    marker=marker,
+                                    part=part,
+                                    quantity_per_set=quantity_per_set,
+                                )
+                                for part, quantity_per_set in marker_outputs
+                            ]
+                        )
+                    messages.success(request, "Marker added.")
+                    return redirect("production:products")
+                except ValidationError as exc:
+                    errors = exc.messages if hasattr(exc, "messages") else [str(exc)]
+                    for error in errors[:8]:
+                        messages.error(request, error)
+                    if len(errors) > 8:
+                        messages.error(request, f"...and {len(errors) - 8} more row errors.")
+            show_add_marker_modal = True
 
         if action == "add_bom":
             if bom_form.is_valid():
@@ -429,10 +529,58 @@ def product_bom_page(request):
     open_bom_raw = (request.POST.get("open_bom") or request.GET.get("open_bom") or "").strip()
     open_bom_id = int(open_bom_raw) if open_bom_raw.isdigit() else None
     catalog_items = list(
-        FinishedProduct.objects.prefetch_related("bom_items__material", "bom_items__part").order_by("item_type", "name")
+        FinishedProduct.objects.prefetch_related(
+            "bom_items__material",
+            "bom_items__part",
+            "marker_outputs__marker",
+        ).order_by("item_type", "name")
     )
     finished_products = [item for item in catalog_items if item.item_type == FinishedProduct.ItemType.FINISHED]
     parts = [item for item in catalog_items if item.item_type == FinishedProduct.ItemType.PART]
+    markers = list(
+        Marker.objects.select_related("material")
+        .prefetch_related("outputs__part")
+        .order_by("marker_id")
+    )
+    marker_material_groups: dict[tuple[str, str], dict[str, object]] = {}
+    marker_material_group_order: list[tuple[str, str]] = []
+    for material in marker_material_queryset():
+        group_key = (material.name, material.rm_id)
+        if group_key not in marker_material_groups:
+            marker_material_groups[group_key] = {
+                "label": f"{material.name} ({material.rm_id})",
+                "variants": [],
+            }
+            marker_material_group_order.append(group_key)
+        marker_material_groups[group_key]["variants"].append(
+            {
+                "id": material.id,
+                "label": material.variant_display or material.colour or material.code or material.rm_id,
+                "unit": material.unit,
+                "code": material.code,
+            }
+        )
+    marker_material_catalog = [
+        {
+            "label": marker_material_groups[group_key]["label"],
+            "variants": marker_material_groups[group_key]["variants"],
+        }
+        for group_key in marker_material_group_order
+    ]
+    marker_part_choices = [
+        {
+            "id": part.id,
+            "label": f"{part.name}{f' [{part.colour}]' if part.colour else ''} ({part.sku})",
+        }
+        for part in parts
+    ]
+    marker_sku_suggestions = [
+        {
+            "sku": product.sku,
+            "label": f"{product.name} ({product.sku})",
+        }
+        for product in finished_products
+    ]
     product_choices = [
         {
             "id": product.id,
@@ -458,19 +606,26 @@ def product_bom_page(request):
         "can_manage": can_manage,
         "product_form": product_form,
         "part_form": part_form,
+        "marker_form": marker_form,
         "bom_form": bom_form,
         "csv_form": csv_form,
         "products": finished_products,
         "parts": parts,
+        "markers": markers,
         "catalog_items": catalog_items,
         "product_choices": product_choices,
         "product_component_map": product_component_map,
         "open_bom_id": open_bom_id,
+        "marker_material_catalog": marker_material_catalog,
+        "marker_part_choices": marker_part_choices,
+        "marker_sku_suggestions": marker_sku_suggestions,
         "show_add_bom_modal": show_add_bom_modal,
         "show_upload_csv_modal": show_upload_csv_modal,
         "show_add_product_modal": show_add_product_modal,
         "show_add_part_modal": show_add_part_modal,
+        "show_add_marker_modal": show_add_marker_modal,
         "bom_bulk_rows": bom_bulk_rows,
+        "marker_output_rows_seed": marker_output_rows_seed,
     }
     return render(request, "production/products.html", context)
 
@@ -580,6 +735,33 @@ def delete_finished_product(request, product_id: int):
 
 
 @login_required
+@require_http_methods(["POST"])
+def delete_marker(request, marker_id: int):
+    denied = require_roles(
+        request,
+        PRODUCTION_MANAGE_ROLES,
+        redirect_to="production:products",
+        area="products and parts",
+    )
+    if denied:
+        return denied
+
+    marker = Marker.objects.filter(pk=marker_id).first()
+    if not marker:
+        messages.error(request, "Selected marker no longer exists.")
+        return redirect("production:products")
+
+    marker_label = marker.marker_label
+    try:
+        marker.delete()
+        messages.success(request, f"Marker {marker_label} deleted.")
+    except ProtectedError as exc:
+        protected_labels = sorted({obj._meta.verbose_name for obj in exc.protected_objects})
+        linked_text = f" Linked records: {', '.join(protected_labels)}." if protected_labels else ""
+        messages.error(request, f"Marker cannot be deleted because it is linked to existing records.{linked_text}")
+    return redirect("production:products")
+
+@login_required
 @require_http_methods(["GET"])
 def export_product_bom_excel(request, product_id: int):
     denied = _deny_production_view(request, area="products and parts")
@@ -632,14 +814,22 @@ def production_orders_page(request):
 
         if create_form.is_valid():
             try:
-                bom_qty_overrides = _extract_order_bom_override_map(request.POST)
-                order = create_production_order_with_rm_request(
-                    product=create_form.cleaned_data["product"],
-                    quantity=create_form.cleaned_data["quantity"],
-                    notes=create_form.cleaned_data["notes"],
-                    created_by=request.user,
-                    bom_qty_overrides=bom_qty_overrides,
-                )
+                if create_form.cleaned_data["order_type"] == ProductionOrder.TargetType.MARKER:
+                    order = create_marker_production_order_with_rm_request(
+                        marker=create_form.cleaned_data["marker"],
+                        sets=create_form.cleaned_data["quantity"],
+                        notes=create_form.cleaned_data["notes"],
+                        created_by=request.user,
+                    )
+                else:
+                    bom_qty_overrides = _extract_order_bom_override_map(request.POST)
+                    order = create_production_order_with_rm_request(
+                        product=create_form.cleaned_data["product"],
+                        quantity=create_form.cleaned_data["quantity"],
+                        notes=create_form.cleaned_data["notes"],
+                        created_by=request.user,
+                        bom_qty_overrides=bom_qty_overrides,
+                    )
                 messages.success(
                     request,
                     f"Production order #{order.id} created. Status: Awaiting RM Release.",
@@ -649,11 +839,15 @@ def production_orders_page(request):
                 create_form.add_error(None, str(exc))
 
     orders = (
-        ProductionOrder.objects.select_related("product", "created_by")
-        .prefetch_related("consumptions__material", "consumptions__part")
+        ProductionOrder.objects.select_related("product", "marker", "created_by")
+        .prefetch_related(
+            "consumptions__material",
+            "consumptions__part",
+            "marker__outputs__part",
+        )
     )
     status_filter = request.GET.get("status", "").strip()
-    product_filter = request.GET.get("product", "").strip()
+    target_filter = (request.GET.get("target") or request.GET.get("product") or "").strip()
     q_filter = request.GET.get("q", "").strip()
     date_from = _parse_iso_date(request.GET.get("date_from"))
     date_to = _parse_iso_date(request.GET.get("date_to"))
@@ -661,14 +855,25 @@ def production_orders_page(request):
     valid_statuses = {value for value, _label in ProductionOrder.Status.choices}
     if status_filter in valid_statuses:
         orders = orders.filter(status=status_filter)
-    if product_filter.isdigit():
-        orders = orders.filter(product_id=int(product_filter))
+    if target_filter.startswith("product:") and target_filter.removeprefix("product:").isdigit():
+        orders = orders.filter(product_id=int(target_filter.removeprefix("product:")))
+    elif target_filter.startswith("marker:") and target_filter.removeprefix("marker:").isdigit():
+        orders = orders.filter(marker_id=int(target_filter.removeprefix("marker:")))
+    elif target_filter.isdigit():
+        orders = orders.filter(product_id=int(target_filter))
     if date_from:
         orders = orders.filter(created_at__date__gte=date_from)
     if date_to:
         orders = orders.filter(created_at__date__lte=date_to)
     if q_filter:
-        query = Q(product__name__icontains=q_filter) | Q(notes__icontains=q_filter) | Q(created_by__username__icontains=q_filter)
+        query = (
+            Q(product__name__icontains=q_filter)
+            | Q(product__sku__icontains=q_filter)
+            | Q(marker__marker_id__icontains=q_filter)
+            | Q(marker__sku_id__icontains=q_filter)
+            | Q(notes__icontains=q_filter)
+            | Q(created_by__username__icontains=q_filter)
+        )
         if q_filter.isdigit():
             query |= Q(id=int(q_filter))
         orders = orders.filter(query)
@@ -679,6 +884,9 @@ def production_orders_page(request):
     status_form = ProductionStatusForm()
     create_products = list(
         create_form.fields["product"].queryset.prefetch_related("bom_items__material", "bom_items__part")
+    )
+    create_markers = list(
+        create_form.fields["marker"].queryset.select_related("material").prefetch_related("outputs__part")
     )
     raw_component_options = [
         {
@@ -696,6 +904,7 @@ def production_orders_page(request):
     )
     order_bom_map: dict[str, list[dict[str, str]]] = {}
     order_component_option_map: dict[str, list[dict[str, str]]] = {}
+    marker_order_map: dict[str, dict[str, object]] = {}
     for product in create_products:
         order_bom_map[str(product.id)] = [
             {
@@ -726,6 +935,42 @@ def production_orders_page(request):
             )
         order_component_option_map[str(product.id)] = product_options
 
+    for marker in create_markers:
+        marker_order_map[str(marker.id)] = {
+            "marker_id": marker.marker_id,
+            "label": marker.marker_label,
+            "material_name": marker.material_label,
+            "material_code": marker.material.code,
+            "unit": marker.material.unit,
+            "length_per_layer": f"{marker.length_per_layer:.3f}",
+            "sets_per_layer": f"{marker.sets_per_layer:.3f}",
+            "fabric_consumption_per_set": f"{marker.fabric_consumption_per_set:.3f}",
+            "outputs": [
+                {
+                    "part_name": output.part.name,
+                    "part_sku": output.part.sku,
+                    "part_colour": output.part.colour,
+                    "quantity_per_set": f"{output.quantity_per_set:.3f}",
+                }
+                for output in marker.outputs.all()
+            ],
+        }
+
+    target_choices = [
+        {
+            "value": f"product:{product.id}",
+            "label": f"Finished Product - {product.name} ({product.sku})",
+        }
+        for product in FinishedProduct.objects.filter(item_type=FinishedProduct.ItemType.FINISHED).order_by("name", "sku")
+    ]
+    target_choices.extend(
+        {
+            "value": f"marker:{marker.id}",
+            "label": f"Marker - {marker.marker_label}",
+        }
+        for marker in Marker.objects.order_by("marker_id")
+    )
+
     kpi_open_orders = ProductionOrder.objects.filter(
         status__in=[
             ProductionOrder.Status.AWAITING_RM_RELEASE,
@@ -746,12 +991,13 @@ def production_orders_page(request):
         "page_obj": page_obj,
         "status_form": status_form,
         "status_choices": ProductionOrder.Status.choices,
-        "product_choices": FinishedProduct.objects.order_by("name"),
+        "target_choices": target_choices,
         "order_bom_map": order_bom_map,
         "order_component_option_map": order_component_option_map,
+        "marker_order_map": marker_order_map,
         "filter_values": {
             "status": status_filter,
-            "product": product_filter,
+            "target": target_filter,
             "q": q_filter,
             "date_from": request.GET.get("date_from", ""),
             "date_to": request.GET.get("date_to", ""),
@@ -812,6 +1058,9 @@ def update_production_status(request):
         )
         return redirect(_next_url_or_default(request))
     if next_status == ProductionOrder.Status.COMPLETED:
+        if order.is_marker_order:
+            messages.error(request, "Use part production completion fields to complete a marker order.")
+            return redirect(_next_url_or_default(request))
         try:
             completed = complete_production_order(
                 production_order=order,
@@ -831,7 +1080,54 @@ def update_production_status(request):
 
     order.status = next_status
     order.save(update_fields=["status"])
+    logger.info("Production order #%d status changed to %s by user=%s", order.id, next_status, request.user.username)
     messages.success(request, "Production order status updated.")
+    return redirect(_next_url_or_default(request))
+
+
+@login_required
+@require_http_methods(["POST"])
+def complete_marker_production_order_action(request, order_id: int):
+    denied = require_roles(
+        request,
+        PRODUCTION_MANAGE_ROLES,
+        redirect_to="production:orders",
+        area="production orders",
+    )
+    if denied:
+        return denied
+
+    form = PartProductionCompletionForm(request.POST)
+    if not form.is_valid():
+        first_error = next(iter(form.errors.values())) if form.errors else None
+        message = first_error[0] if first_error else "Invalid part production completion input."
+        messages.error(request, message)
+        return redirect(_next_url_or_default(request))
+    if form.cleaned_data["order_id"] != order_id:
+        messages.error(request, "Invalid marker production order reference.")
+        return redirect(_next_url_or_default(request))
+
+    order = get_object_or_404(ProductionOrder, pk=order_id)
+    try:
+        completed = complete_marker_production_order(
+            production_order=order,
+            actual_length=form.cleaned_data["actual_length"],
+            actual_layers=form.cleaned_data["actual_layers"],
+            actual_sets_per_layer=form.cleaned_data["actual_sets_per_layer"],
+            total_sets=form.cleaned_data["total_sets"],
+            actual_fabric_issued=form.cleaned_data["actual_fabric_issued"],
+            good_sets=form.cleaned_data["good_sets"],
+            rejected_sets=form.cleaned_data["rejected_sets"],
+            completed_by=request.user,
+        )
+        messages.success(
+            request,
+            f"Marker production order #{completed.id} completed. "
+            f"Good sets: {completed.produced_qty}, Rejected sets: {completed.scrap_qty}.",
+        )
+    except ValidationError as exc:
+        message = exc.messages[0] if hasattr(exc, "messages") and exc.messages else str(exc)
+        messages.error(request, message)
     return redirect(_next_url_or_default(request))
 
 
@@ -850,6 +1146,7 @@ def cancel_production_order_action(request, order_id: int):
     order = get_object_or_404(ProductionOrder, pk=order_id)
     try:
         cancel_production_order(production_order=order, cancelled_by=request.user)
+        logger.info("Production order #%d cancelled by user=%s", order.id, request.user.username)
         messages.success(request, f"Production order #{order.id} cancelled.")
     except ValidationError as exc:
         messages.error(request, str(exc))

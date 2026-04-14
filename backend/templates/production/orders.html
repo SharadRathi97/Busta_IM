@@ -45,10 +45,24 @@
     <form method="post" class="row g-2 align-items-end" id="createProductionOrderForm">
       {% csrf_token %}
       <input type="hidden" name="next" value="{{ next_url }}">
-      <div class="col-12 col-md-4">
+      <div class="col-12 col-md-2">
+        <label class="form-label">{{ create_form.order_type.label }}</label>
+        {{ create_form.order_type }}
+        {% for error in create_form.order_type.errors %}
+          <div class="text-danger small">{{ error }}</div>
+        {% endfor %}
+      </div>
+      <div class="col-12 col-md-3" data-finished-product-target>
         <label class="form-label">{{ create_form.product.label }}</label>
         {{ create_form.product }}
         {% for error in create_form.product.errors %}
+          <div class="text-danger small">{{ error }}</div>
+        {% endfor %}
+      </div>
+      <div class="col-12 col-md-3 d-none" data-marker-target>
+        <label class="form-label">{{ create_form.marker.label }}</label>
+        {{ create_form.marker }}
+        {% for error in create_form.marker.errors %}
           <div class="text-danger small">{{ error }}</div>
         {% endfor %}
       </div>
@@ -59,7 +73,7 @@
           <div class="text-danger small">{{ error }}</div>
         {% endfor %}
       </div>
-      <div class="col-12 col-md-4">
+      <div class="col-12 col-md-3">
         <label class="form-label">{{ create_form.notes.label }}</label>
         {{ create_form.notes }}
         {% for error in create_form.notes.errors %}
@@ -67,7 +81,7 @@
         {% endfor %}
       </div>
       <div class="col-12 col-md-2">
-        <button class="btn btn-primary w-100" type="button" id="reviewBomBtn">Review BOM</button>
+        <button class="btn btn-primary w-100" type="button" id="reviewBomBtn">Review Order</button>
       </div>
       {% if create_form.non_field_errors %}
         <div class="col-12 text-danger small">{{ create_form.non_field_errors|join:', ' }}</div>
@@ -83,16 +97,16 @@
         <div>
           <h2 class="modal-title h5 mb-0" id="reviewBomModalLabel">Review BOM for Production</h2>
           <div class="small text-muted">
-            Product: <span id="reviewBomProductName">-</span> · Planned Qty: <span id="reviewBomPlannedQty">0</span>
+            Target: <span id="reviewBomProductName">-</span> · Planned Qty / Sets: <span id="reviewBomPlannedQty">0</span>
           </div>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <div class="small text-muted mb-2">Edit component item and qty per unit for this order only. Master BOM will not be changed.</div>
+        <div class="small text-muted mb-2" id="reviewBomHelpText">Edit component item and qty per unit for this order only. Master BOM will not be changed.</div>
         <div class="table-responsive">
           <table class="table table-sm align-middle">
-            <thead>
+            <thead id="reviewBomHead">
               <tr>
                 <th>Component (This Order)</th>
                 <th>Qty / Unit (This Order)</th>
@@ -128,12 +142,12 @@
         </select>
       </div>
       <div class="col-6 col-md-2">
-        <label class="form-label mb-1">Product</label>
-        <select name="product" class="form-select form-select-sm">
-          <option value="">All Products</option>
-          {% for product in product_choices %}
-            <option value="{{ product.id }}" {% if filter_values.product == product.id|stringformat:'s' %}selected{% endif %}>
-              {{ product.name }}
+        <label class="form-label mb-1">Target</label>
+        <select name="target" class="form-select form-select-sm">
+          <option value="">All Targets</option>
+          {% for target in target_choices %}
+            <option value="{{ target.value }}" {% if filter_values.target == target.value %}selected{% endif %}>
+              {{ target.label }}
             </option>
           {% endfor %}
         </select>
@@ -152,15 +166,15 @@
         <thead>
           <tr>
             <th>ID</th>
-            <th>Product</th>
-            <th>Planned Qty</th>
-            <th>Produced Qty</th>
-            <th>Scrap Qty</th>
+            <th>Target</th>
+            <th>Planned Qty / Sets</th>
+            <th>Produced / Good Sets</th>
+            <th>Scrap / Rejected Sets</th>
             <th>Variance</th>
             <th>Status</th>
             <th>Created By</th>
             <th>Completed At</th>
-            <th>BOM Used</th>
+            <th>Consumption</th>
             <th>Action</th>
           </tr>
         </thead>
@@ -168,7 +182,10 @@
           {% for order in orders %}
             <tr>
               <td>{{ order.id }}</td>
-              <td>{{ order.product.name }}</td>
+              <td>
+                {{ order.target_display }}
+                <div class="small text-muted">{{ order.get_target_type_display }}</div>
+              </td>
               <td>{{ order.planned_qty|floatformat:3 }}</td>
               <td>{% if order.status == 'completed' %}{{ order.produced_qty|floatformat:3 }}{% else %}-{% endif %}</td>
               <td>{% if order.status == 'completed' %}{{ order.scrap_qty|floatformat:3 }}{% else %}-{% endif %}</td>
@@ -190,28 +207,44 @@
               <td>{% if order.completed_at %}{{ order.completed_at|date:'Y-m-d H:i' }}{% else %}-{% endif %}</td>
               <td>
                 <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#orderBomModal{{ order.id }}">
-                  View BOM
+                  {% if order.target_type == 'marker' %}View Marker{% else %}View BOM{% endif %}
                 </button>
               </td>
               <td>
                 {% if can_manage %}
                   <div class="d-flex flex-wrap gap-1 align-items-center">
                     {% if order.status != 'cancelled' and order.status != 'completed' and order.status != 'awaiting_rm_release' %}
-                      <form method="post" action="{% url 'production:update_status' %}" class="inline-form production-status-form" data-current-status="{{ order.status }}">
-                        {% csrf_token %}
-                        <input type="hidden" name="next" value="{{ next_url }}">
-                        <input type="hidden" name="order_id" value="{{ order.id }}">
-                        <select name="status" class="form-select form-select-sm">
-                          <option value="planned" {% if order.status == 'planned' %}selected{% endif %}>Planned</option>
-                          <option value="in_progress" {% if order.status == 'in_progress' %}selected{% endif %}>In Progress</option>
-                          <option value="completed" {% if order.status == 'completed' %}selected{% endif %}>Completed</option>
-                        </select>
-                        <div class="completion-inputs d-none">
-                          <input type="number" name="produced_qty" class="form-control form-control-sm" min="0.001" step="0.001" placeholder="Produced">
-                          <input type="number" name="scrap_qty" class="form-control form-control-sm" min="0" step="0.001" placeholder="Scrap" value="0.000">
-                        </div>
-                        <button class="btn btn-sm btn-outline-primary" type="submit">Update</button>
-                      </form>
+                      {% if order.target_type == 'marker' %}
+                        <form method="post" action="{% url 'production:update_status' %}" class="inline-form">
+                          {% csrf_token %}
+                          <input type="hidden" name="next" value="{{ next_url }}">
+                          <input type="hidden" name="order_id" value="{{ order.id }}">
+                          <select name="status" class="form-select form-select-sm">
+                            <option value="planned" {% if order.status == 'planned' %}selected{% endif %}>Planned</option>
+                            <option value="in_progress" {% if order.status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                          </select>
+                          <button class="btn btn-sm btn-outline-primary" type="submit">Update</button>
+                        </form>
+                        <button class="btn btn-sm btn-outline-success" type="button" data-bs-toggle="modal" data-bs-target="#completeMarkerModal{{ order.id }}">
+                          Complete Cut
+                        </button>
+                      {% else %}
+                        <form method="post" action="{% url 'production:update_status' %}" class="inline-form production-status-form" data-current-status="{{ order.status }}">
+                          {% csrf_token %}
+                          <input type="hidden" name="next" value="{{ next_url }}">
+                          <input type="hidden" name="order_id" value="{{ order.id }}">
+                          <select name="status" class="form-select form-select-sm">
+                            <option value="planned" {% if order.status == 'planned' %}selected{% endif %}>Planned</option>
+                            <option value="in_progress" {% if order.status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                            <option value="completed" {% if order.status == 'completed' %}selected{% endif %}>Completed</option>
+                          </select>
+                          <div class="completion-inputs d-none">
+                            <input type="number" name="produced_qty" class="form-control form-control-sm" min="0.001" step="0.001" placeholder="Produced">
+                            <input type="number" name="scrap_qty" class="form-control form-control-sm" min="0" step="0.001" placeholder="Scrap" value="0.000">
+                          </div>
+                          <button class="btn btn-sm btn-outline-primary" type="submit">Update</button>
+                        </form>
+                      {% endif %}
                     {% endif %}
                     {% if order.status == 'awaiting_rm_release' %}
                       <span class="text-muted small">Waiting for Inventory Manager release</span>
@@ -253,9 +286,9 @@
       <div class="modal-content">
         <div class="modal-header">
           <div>
-            <h2 class="modal-title h5 mb-0" id="orderBomModalLabel{{ order.id }}">BOM Used - Production Order #{{ order.id }}</h2>
+            <h2 class="modal-title h5 mb-0" id="orderBomModalLabel{{ order.id }}">Consumption - Production Order #{{ order.id }}</h2>
             <div class="small text-muted">
-              {{ order.product.name }} · Planned Qty {{ order.planned_qty|floatformat:3 }}
+              {{ order.target_display }} · Planned Qty / Sets {{ order.planned_qty|floatformat:3 }}
             </div>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -293,6 +326,82 @@
       </div>
     </div>
   </div>
+  {% if order.target_type == 'marker' and order.status != 'cancelled' and order.status != 'completed' and order.status != 'awaiting_rm_release' %}
+    <div class="modal fade" id="completeMarkerModal{{ order.id }}" tabindex="-1" aria-labelledby="completeMarkerModalLabel{{ order.id }}" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div>
+              <h2 class="modal-title h5 mb-0" id="completeMarkerModalLabel{{ order.id }}">Complete Marker Cut #{{ order.id }}</h2>
+              <div class="small text-muted">{{ order.marker.marker_label }} · Planned Sets {{ order.planned_qty|floatformat:3 }}</div>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <form method="post" action="{% url 'production:complete_marker_order' order.id %}">
+            <div class="modal-body">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ next_url }}">
+              <input type="hidden" name="order_id" value="{{ order.id }}">
+              <div class="row g-2">
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Actual Length</label>
+                  <input type="number" name="actual_length" class="form-control form-control-sm" min="0.001" step="0.001" value="{{ order.marker.length_per_layer|floatformat:3 }}" required>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Actual Layers</label>
+                  <input type="number" name="actual_layers" class="form-control form-control-sm" min="1" step="1" required>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Actual Sets / Layer</label>
+                  <input type="number" name="actual_sets_per_layer" class="form-control form-control-sm" min="0.001" step="0.001" value="{{ order.marker.sets_per_layer|floatformat:3 }}" required>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Total Sets</label>
+                  <input type="number" name="total_sets" class="form-control form-control-sm" min="0.001" step="0.001" value="{{ order.planned_qty|floatformat:3 }}" required>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Actual Fabric Issued</label>
+                  <input type="number" name="actual_fabric_issued" class="form-control form-control-sm" min="0.001" step="0.001" required>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Good Sets</label>
+                  <input type="number" name="good_sets" class="form-control form-control-sm" min="0" step="0.001" value="{{ order.planned_qty|floatformat:3 }}" required>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Rejected Sets</label>
+                  <input type="number" name="rejected_sets" class="form-control form-control-sm" min="0" step="0.001" value="0.000" required>
+                </div>
+              </div>
+              <div class="table-responsive mt-3">
+                <table class="table table-sm align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Output Part</th>
+                      <th>Qty / Set</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for output in order.marker.outputs.all %}
+                      <tr>
+                        <td>{{ output.part.name }} <span class="small text-muted">{{ output.part.sku }}</span></td>
+                        <td>{{ output.quantity_per_set|floatformat:3 }}</td>
+                      </tr>
+                    {% empty %}
+                      <tr><td colspan="2">No marker output parts configured.</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-primary">Complete Cut</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  {% endif %}
 {% endfor %}
 {% endblock %}
 
@@ -300,6 +409,7 @@
 {% if can_manage %}
   {{ order_bom_map|json_script:"orderBomMapData" }}
   {{ order_component_option_map|json_script:"orderBomComponentOptionsData" }}
+  {{ marker_order_map|json_script:"markerOrderMapData" }}
 {% endif %}
 <script>
   (() => {
@@ -346,34 +456,50 @@
       const openReviewBtn = document.getElementById("reviewBomBtn");
       const modalEl = document.getElementById("reviewBomModal");
       const confirmBtn = document.getElementById("confirmCreateOrderBtn");
+      const orderTypeSelect = form ? form.querySelector('select[name="order_type"]') : null;
       const productSelect = form ? form.querySelector('select[name="product"]') : null;
+      const markerSelect = form ? form.querySelector('select[name="marker"]') : null;
       const quantityInput = form ? form.querySelector('input[name="quantity"]') : null;
+      const productTarget = document.querySelector("[data-finished-product-target]");
+      const markerTarget = document.querySelector("[data-marker-target]");
       const rowsBody = document.getElementById("reviewBomRows");
       const emptyState = document.getElementById("reviewBomEmptyState");
       const productNameEl = document.getElementById("reviewBomProductName");
       const plannedQtyEl = document.getElementById("reviewBomPlannedQty");
+      const reviewHelpText = document.getElementById("reviewBomHelpText");
+      const reviewHead = document.getElementById("reviewBomHead");
       const mapNode = document.getElementById("orderBomMapData");
       const optionsNode = document.getElementById("orderBomComponentOptionsData");
+      const markerMapNode = document.getElementById("markerOrderMapData");
       if (
         !form ||
         !openReviewBtn ||
         !modalEl ||
         !confirmBtn ||
+        !orderTypeSelect ||
         !productSelect ||
+        !markerSelect ||
         !quantityInput ||
+        !productTarget ||
+        !markerTarget ||
         !rowsBody ||
         !emptyState ||
         !productNameEl ||
         !plannedQtyEl ||
+        !reviewHelpText ||
+        !reviewHead ||
         !mapNode ||
-        !optionsNode
+        !optionsNode ||
+        !markerMapNode
       ) {
         return;
       }
 
       const bomByProduct = JSON.parse(mapNode.textContent || "{}");
       const componentOptionsByProduct = JSON.parse(optionsNode.textContent || "{}");
+      const markersById = JSON.parse(markerMapNode.textContent || "{}");
       const modal = new bootstrap.Modal(modalEl);
+      const markerOrderType = "marker";
 
       const normalizeQty = (value) => {
         const parsed = Number.parseFloat(value);
@@ -393,11 +519,35 @@
         cell.textContent = `${(perUnit * planned).toFixed(3)} ${unit}`;
       };
 
+      const syncOrderTypeFields = () => {
+        const isMarker = orderTypeSelect.value === markerOrderType;
+        productTarget.classList.toggle("d-none", isMarker);
+        markerTarget.classList.toggle("d-none", !isMarker);
+        productSelect.required = !isMarker;
+        markerSelect.required = isMarker;
+      };
+
       const validateBeforeOpening = () => {
-        const productId = productSelect.value;
         const plannedQty = normalizeQty(quantityInput.value);
+        const isMarker = orderTypeSelect.value === markerOrderType;
+        if (isMarker) {
+          const markerId = markerSelect.value;
+          if (!markerId) {
+            window.alert("Select a marker first.");
+            markerSelect.focus();
+            return null;
+          }
+          if (!plannedQty) {
+            window.alert("Enter a valid planned set count.");
+            quantityInput.focus();
+            return null;
+          }
+          return { orderType: markerOrderType, markerId, plannedQty };
+        }
+
+        const productId = productSelect.value;
         if (!productId) {
-          window.alert("Select a product first.");
+          window.alert("Select a finished product first.");
           productSelect.focus();
           return null;
         }
@@ -406,10 +556,79 @@
           quantityInput.focus();
           return null;
         }
-        return { productId, plannedQty };
+        return { orderType: "finished_product", productId, plannedQty };
+      };
+
+      const setReviewHeader = (columns) => {
+        const tr = document.createElement("tr");
+        columns.forEach((label) => {
+          const th = document.createElement("th");
+          th.textContent = label;
+          tr.appendChild(th);
+        });
+        reviewHead.replaceChildren(tr);
+      };
+
+      const buildMarkerReviewRows = (markerId, plannedQty) => {
+        rowsBody.replaceChildren();
+        emptyState.classList.add("d-none");
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Create Order";
+        reviewHelpText.textContent = "Marker orders reserve planned fabric first. Actual cutting values are entered when the cut is completed.";
+        setReviewHeader(["Marker Material", "Planned Fabric", "Output Parts"]);
+
+        const selectedOption = markerSelect.options[markerSelect.selectedIndex];
+        productNameEl.textContent = selectedOption ? selectedOption.textContent.trim() : "-";
+        plannedQtyEl.textContent = plannedQty.toFixed(3);
+
+        const marker = markersById[String(markerId)];
+        if (!marker) {
+          emptyState.textContent = "Marker details are not available. Refresh and try again.";
+          emptyState.classList.remove("d-none");
+          confirmBtn.disabled = true;
+          return;
+        }
+        if (!Array.isArray(marker.outputs) || !marker.outputs.length) {
+          emptyState.textContent = "No output parts are defined for the selected marker.";
+          emptyState.classList.remove("d-none");
+          confirmBtn.disabled = true;
+          confirmBtn.textContent = "Outputs Missing";
+          return;
+        }
+
+        const plannedFabric = (plannedQty * Number.parseFloat(marker.fabric_consumption_per_set || "0")).toFixed(3);
+        const tr = document.createElement("tr");
+        const materialCell = document.createElement("td");
+        materialCell.textContent = marker.material_name || "-";
+        const materialMeta = document.createElement("div");
+        materialMeta.className = "small text-muted";
+        materialMeta.textContent = `${marker.material_code || "-"} · ${marker.length_per_layer} ${marker.unit} / layer · ${marker.sets_per_layer} sets / layer`;
+        materialCell.appendChild(materialMeta);
+
+        const fabricCell = document.createElement("td");
+        fabricCell.textContent = `${plannedFabric} ${marker.unit}`;
+
+        const outputsCell = document.createElement("td");
+        marker.outputs.forEach((output, index) => {
+          const line = document.createElement("div");
+          const colour = output.part_colour ? ` · ${output.part_colour}` : "";
+          line.textContent = `${output.part_name} (${output.part_sku}${colour}): ${output.quantity_per_set} / set`;
+          outputsCell.appendChild(line);
+          if (index < marker.outputs.length - 1) {
+            line.className = "mb-1";
+          }
+        });
+
+        tr.appendChild(materialCell);
+        tr.appendChild(fabricCell);
+        tr.appendChild(outputsCell);
+        rowsBody.appendChild(tr);
       };
 
       const buildReviewRows = (productId, plannedQty) => {
+        reviewHelpText.textContent = "Edit component item and qty per unit for this order only. Master BOM will not be changed.";
+        setReviewHeader(["Component (This Order)", "Qty / Unit (This Order)", "Required Qty"]);
+        emptyState.textContent = "No BOM is defined for the selected product.";
         rowsBody.replaceChildren();
         emptyState.classList.add("d-none");
         confirmBtn.disabled = false;
@@ -428,6 +647,7 @@
           return;
         }
         if (!componentOptions.length) {
+          emptyState.textContent = "No components are available for the selected product.";
           emptyState.classList.remove("d-none");
           confirmBtn.disabled = true;
           confirmBtn.textContent = "No Components";
@@ -521,7 +741,11 @@
         if (!validated) {
           return;
         }
-        buildReviewRows(validated.productId, validated.plannedQty);
+        if (validated.orderType === markerOrderType) {
+          buildMarkerReviewRows(validated.markerId, validated.plannedQty);
+        } else {
+          buildReviewRows(validated.productId, validated.plannedQty);
+        }
         form.dataset.reviewedBom = "0";
         modal.show();
       });
@@ -542,6 +766,9 @@
       modalEl.addEventListener("hidden.bs.modal", () => {
         form.dataset.reviewedBom = "0";
       });
+
+      orderTypeSelect.addEventListener("change", syncOrderTypeFields);
+      syncOrderTypeFields();
     })();
   </script>
 {% endif %}

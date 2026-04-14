@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
+from django.db.models import F
 from django.utils import timezone
 
 from inventory.models import InventoryLedger, RawMaterial
@@ -118,6 +119,12 @@ class PurchaseOrderItem(models.Model):
 
     class Meta:
         ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(received_quantity__lte=F("quantity")),
+                name="po_item_received_lte_quantity",
+            ),
+        ]
 
     @property
     def pending_quantity(self) -> Decimal:

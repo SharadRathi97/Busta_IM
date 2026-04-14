@@ -23,7 +23,8 @@
               <th>ID</th>
               <th>Part Name</th>
               <th>Colour</th>
-              <th>SKU</th>
+              <th>Finished Product SKU</th>
+              <th>Marker Sources</th>
               <th>Current Stock</th>
             </tr>
           </thead>
@@ -34,16 +35,74 @@
                 <td>{{ item.name }}</td>
                 <td>{{ item.colour|default:"-" }}</td>
                 <td>{{ item.sku }}</td>
+                <td>
+                  {% for output in item.marker_outputs.all %}
+                    {{ output.marker.marker_id }}{% if not forloop.last %}<br>{% endif %}
+                  {% empty %}
+                    -
+                  {% endfor %}
+                </td>
                 <td>{{ item.current_stock|floatformat:3 }}</td>
               </tr>
             {% empty %}
-              <tr><td colspan="5">No parts found.</td></tr>
+              <tr><td colspan="6">No parts found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     </div>
     {% include "partials/pagination.html" with page_obj=page_obj %}
+  </div>
+</div>
+
+<div class="card card-soft mt-3">
+  <div class="card-body">
+    <h2 class="h5">Part Production From Cutting</h2>
+    <div class="table-meta mb-2">Latest 50 cut records</div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Cut ID</th>
+              <th>Marker ID</th>
+              <th>Actual Length</th>
+              <th>Actual Layers</th>
+              <th>Actual Sets / Layer</th>
+              <th>Total Sets</th>
+              <th>Actual Fabric Issued</th>
+              <th>Good Sets</th>
+              <th>Rejected Sets</th>
+              <th>Output Parts</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for cut in part_productions %}
+              <tr>
+                <td>{{ cut.id }}</td>
+                <td>{{ cut.marker.marker_id }}</td>
+                <td>{{ cut.actual_length|floatformat:3 }}</td>
+                <td>{{ cut.actual_layers }}</td>
+                <td>{{ cut.actual_sets_per_layer|floatformat:3 }}</td>
+                <td>{{ cut.total_sets|floatformat:3 }}</td>
+                <td>{{ cut.actual_fabric_issued|floatformat:3 }} {{ cut.marker.material.unit }}</td>
+                <td>{{ cut.good_sets|floatformat:3 }}</td>
+                <td>{{ cut.rejected_sets|floatformat:3 }}</td>
+                <td>
+                  {% for output in cut.marker.outputs.all %}
+                    {{ output.part.name }}: {{ output.quantity_per_set|floatformat:3 }} / set{% if not forloop.last %}<br>{% endif %}
+                  {% empty %}
+                    -
+                  {% endfor %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="10">No part production cuts recorded.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}

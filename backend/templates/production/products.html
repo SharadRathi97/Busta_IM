@@ -11,6 +11,9 @@
   <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#addPartModal">
     Add Part
   </button>
+  <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#addMarkerModal">
+    Add Marker
+  </button>
   <button class="btn btn-outline-primary" id="uploadBomCsvBtn" type="button" data-template-url="{% url 'production:bom_csv_template' %}" data-bs-toggle="modal" data-bs-target="#uploadBomCsvModal">
     Upload CSV
   </button>
@@ -19,6 +22,12 @@
   </button>
 </div>
 {% endif %}
+
+<datalist id="finishedProductSkuSuggestions">
+  {% for suggestion in marker_sku_suggestions %}
+    <option value="{{ suggestion.sku }}" label="{{ suggestion.label }}"></option>
+  {% endfor %}
+</datalist>
 
 <div class="card card-soft mb-3">
   <div class="card-body">
@@ -32,7 +41,6 @@
               <th>ID</th>
               <th>Image</th>
               <th>Name</th>
-              <th>Colour</th>
               <th>SKU</th>
               <th>BOM Items</th>
               {% if can_manage %}<th>Actions</th>{% endif %}
@@ -54,7 +62,6 @@
                     {{ p.name }}
                   </button>
                 </td>
-                <td>{{ p.colour|default:"-" }}</td>
                 <td>{{ p.sku }}</td>
                 <td><span class="badge badge-soft">{{ p.bom_items.all|length }}</span></td>
                 {% if can_manage %}
@@ -67,7 +74,7 @@
                 {% endif %}
               </tr>
             {% empty %}
-              <tr><td colspan="{% if can_manage %}7{% else %}6{% endif %}">No finished products found.</td></tr>
+              <tr><td colspan="{% if can_manage %}6{% else %}5{% endif %}">No finished products found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -87,7 +94,9 @@
             <tr>
               <th>ID</th>
               <th>Name</th>
-              <th>SKU</th>
+              <th>Colour</th>
+              <th>Finished Product SKU</th>
+              <th>Marker Sources</th>
               <th>BOM Items</th>
               {% if can_manage %}<th>Actions</th>{% endif %}
             </tr>
@@ -101,7 +110,15 @@
                     {{ p.name }}
                   </button>
                 </td>
+                <td>{{ p.colour|default:"-" }}</td>
                 <td>{{ p.sku }}</td>
+                <td>
+                  {% for output in p.marker_outputs.all %}
+                    {{ output.marker.marker_id }}{% if not forloop.last %}<br>{% endif %}
+                  {% empty %}
+                    -
+                  {% endfor %}
+                </td>
                 <td><span class="badge badge-soft">{{ p.bom_items.all|length }}</span></td>
                 {% if can_manage %}
                   <td>
@@ -113,7 +130,63 @@
                 {% endif %}
               </tr>
             {% empty %}
-              <tr><td colspan="{% if can_manage %}6{% else %}5{% endif %}">No parts found.</td></tr>
+              <tr><td colspan="{% if can_manage %}7{% else %}6{% endif %}">No parts found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card card-soft mt-3">
+  <div class="card-body">
+    <h2 class="h5">Markers</h2>
+    <div class="table-meta mb-2">Output parts are selected when a marker is created.</div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Marker ID</th>
+              <th>Finished Product SKU</th>
+              <th>Material</th>
+              <th>Colour</th>
+              <th>Length / Layer</th>
+              <th>Sets / Layer</th>
+              <th>Fabric / Set</th>
+              <th>Output Parts</th>
+              {% if can_manage %}<th>Actions</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for marker in markers %}
+              <tr>
+                <td>{{ marker.marker_id }}</td>
+                <td>{{ marker.sku_id|default:"-" }}</td>
+                <td>{{ marker.material_label }}</td>
+                <td>{{ marker.colour|default:"-" }}</td>
+                <td>{{ marker.length_per_layer|floatformat:3 }} {{ marker.material.unit }}</td>
+                <td>{{ marker.sets_per_layer|floatformat:3 }}</td>
+                <td>{{ marker.fabric_consumption_per_set|floatformat:3 }} {{ marker.material.unit }}</td>
+                <td>
+                  {% for output in marker.outputs.all %}
+                    {{ output.part.name }}: {{ output.quantity_per_set|floatformat:3 }} / set{% if not forloop.last %}<br>{% endif %}
+                  {% empty %}
+                    -
+                  {% endfor %}
+                </td>
+                {% if can_manage %}
+                  <td>
+                    <form method="post" action="{% url 'production:delete_marker' marker.id %}" onsubmit="return confirm('Delete this marker? Its output part mappings will also be removed.');">
+                      {% csrf_token %}
+                      <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                    </form>
+                  </td>
+                {% endif %}
+              </tr>
+            {% empty %}
+              <tr><td colspan="{% if can_manage %}9{% else %}8{% endif %}">No markers found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -180,7 +253,7 @@
               {% for error in part_form.name.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
             </div>
             <div>
-              <label class="form-label">{{ part_form.sku.label }}</label>
+              <label class="form-label">Finished Product SKU</label>
               {{ part_form.sku }}
               {% for error in part_form.sku.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
             </div>
@@ -194,6 +267,110 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
             <button class="btn btn-primary" type="submit">Add Part</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="addMarkerModal" tabindex="-1" aria-labelledby="addMarkerModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0" id="addMarkerModalLabel">Add Marker</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form method="post" id="addMarkerForm">
+          <div class="modal-body vstack gap-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add_marker">
+            <div>
+              <label class="form-label">{{ marker_form.marker_id.label }}</label>
+              {{ marker_form.marker_id }}
+              {% for error in marker_form.marker_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            <div>
+              <label class="form-label" for="markerMaterialInput">Material</label>
+              <input type="hidden" name="marker-material" id="markerMaterialValue" value="{{ marker_form.material.value|default:'' }}">
+              <input
+                class="form-control"
+                id="markerMaterialInput"
+                type="text"
+                list="markerMaterialSuggestions"
+                autocomplete="off"
+                placeholder="Type fabric, foam, or air mesh"
+                data-marker-material-input
+                required
+              >
+              <datalist id="markerMaterialSuggestions">
+                {% for material_group in marker_material_catalog %}
+                  <option value="{{ material_group.label }}"></option>
+                {% endfor %}
+              </datalist>
+              {% for error in marker_form.material.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            <div>
+              <label class="form-label" for="markerColourSelect">Colour</label>
+              <input type="hidden" name="marker-colour" id="markerColourValue" value="{{ marker_form.colour.value|default:'' }}">
+              <select class="form-select" id="markerColourSelect" data-marker-colour-select required>
+                <option value="">Select material first</option>
+              </select>
+              {% for error in marker_form.colour.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            <div>
+              <label class="form-label" for="markerSkuInput">{{ marker_form.sku_id.label }}</label>
+              <input
+                class="form-control"
+                id="markerSkuInput"
+                type="text"
+                name="marker-sku_id"
+                list="finishedProductSkuSuggestions"
+                value="{{ marker_form.sku_id.value|default:'' }}"
+                autocomplete="off"
+                placeholder="Type finished product SKU"
+              >
+              {% for error in marker_form.sku_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label">{{ marker_form.length_per_layer.label }}</label>
+                {{ marker_form.length_per_layer }}
+                {% for error in marker_form.length_per_layer.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-6">
+                <label class="form-label">{{ marker_form.sets_per_layer.label }}</label>
+                {{ marker_form.sets_per_layer }}
+                {% for error in marker_form.sets_per_layer.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              </div>
+            </div>
+            <div class="border-top pt-3 mt-2">
+              <h3 class="h6 mb-2">Parts Created From This Marker</h3>
+              <div class="table-shell">
+                <div class="table-responsive">
+                  <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th style="min-width: 320px;">Part</th>
+                        <th style="min-width: 160px;">Qty / Set</th>
+                        <th style="width: 80px;">Row</th>
+                      </tr>
+                    </thead>
+                    <tbody id="markerOutputRows"></tbody>
+                  </table>
+                </div>
+              </div>
+              <datalist id="markerPartSuggestions">
+                {% for part_choice in marker_part_choices %}
+                  <option value="{{ part_choice.label }}" data-value="{{ part_choice.id }}"></option>
+                {% endfor %}
+              </datalist>
+              <button class="btn btn-sm btn-outline-primary mt-2" type="button" id="addMarkerOutputRowBtn">Add Part</button>
+            </div>
+            {% for error in marker_form.non_field_errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" type="submit">Add Marker</button>
           </div>
         </form>
       </div>
@@ -429,6 +606,249 @@
         };
         button.addEventListener("click", () => {
           triggerTemplateDownload(button.dataset.templateUrl || "");
+        });
+      })();
+    </script>
+
+    {{ marker_material_catalog|json_script:"markerMaterialCatalogData" }}
+    {{ marker_output_rows_seed|json_script:"markerOutputRowsSeedData" }}
+    <script>
+      (() => {
+        const form = document.getElementById("addMarkerForm");
+        const materialInput = document.getElementById("markerMaterialInput");
+        const materialValueInput = document.getElementById("markerMaterialValue");
+        const colourSelect = document.getElementById("markerColourSelect");
+        const colourValueInput = document.getElementById("markerColourValue");
+        const materialCatalogNode = document.getElementById("markerMaterialCatalogData");
+        const rowsBody = document.getElementById("markerOutputRows");
+        const addRowBtn = document.getElementById("addMarkerOutputRowBtn");
+        const seedRowsNode = document.getElementById("markerOutputRowsSeedData");
+        const partOptionsList = document.getElementById("markerPartSuggestions");
+        if (
+          !form ||
+          !materialInput ||
+          !materialValueInput ||
+          !colourSelect ||
+          !colourValueInput ||
+          !materialCatalogNode ||
+          !rowsBody ||
+          !addRowBtn ||
+          !seedRowsNode ||
+          !partOptionsList
+        ) {
+          return;
+        }
+
+        const materialCatalog = JSON.parse(materialCatalogNode.textContent || "[]");
+        const markerOutputSeedRows = JSON.parse(seedRowsNode.textContent || "[]");
+        const materialByLabel = {};
+        const materialGroupByVariantId = {};
+        materialCatalog.forEach((group) => {
+          materialByLabel[String(group.label)] = group;
+          (Array.isArray(group.variants) ? group.variants : []).forEach((variant) => {
+            materialGroupByVariantId[String(variant.id)] = group;
+          });
+        });
+
+        const partOptions = Array.from(partOptionsList.options).map((option) => ({
+          value: option.value,
+          id: option.dataset.value || "",
+        }));
+        const partLabelById = {};
+        partOptions.forEach((option) => {
+          if (option.id) {
+            partLabelById[String(option.id)] = option.value;
+          }
+        });
+
+        const makeOption = (value, label, selected) => {
+          const option = document.createElement("option");
+          option.value = String(value);
+          option.textContent = label;
+          option.selected = !!selected;
+          return option;
+        };
+
+        const syncColourValue = () => {
+          const selected = colourSelect.options[colourSelect.selectedIndex] || null;
+          if (!selected || !selected.value) {
+            materialValueInput.value = "";
+            colourValueInput.value = "";
+            return;
+          }
+          materialValueInput.value = selected.value;
+          colourValueInput.value = selected.dataset.colour || selected.textContent.trim();
+        };
+
+        const renderColourOptions = (group, preferredVariantId = "") => {
+          colourSelect.replaceChildren();
+          const variants = Array.isArray(group.variants) ? group.variants : [];
+          if (!variants.length) {
+            colourSelect.disabled = true;
+            colourSelect.appendChild(makeOption("", "No colours available", true));
+            syncColourValue();
+            return;
+          }
+
+          colourSelect.disabled = false;
+          const selectedVariantId = String(preferredVariantId || "");
+          const shouldAutoSelect = variants.length === 1;
+          colourSelect.appendChild(makeOption("", "Select colour", !selectedVariantId && !shouldAutoSelect));
+          variants.forEach((variant) => {
+            const option = makeOption(
+              variant.id,
+              `${variant.label} (${variant.code})`,
+              String(variant.id) === selectedVariantId || (!selectedVariantId && shouldAutoSelect)
+            );
+            option.dataset.colour = variant.label;
+            colourSelect.appendChild(option);
+          });
+          syncColourValue();
+        };
+
+        const syncMaterial = (preferredVariantId = materialValueInput.value || "") => {
+          const selectedGroup = materialByLabel[materialInput.value.trim()];
+          if (!selectedGroup) {
+            colourSelect.replaceChildren();
+            colourSelect.disabled = true;
+            colourSelect.appendChild(makeOption("", "Select material first", true));
+            materialValueInput.value = "";
+            colourValueInput.value = "";
+            materialInput.setCustomValidity(
+              materialInput.value.trim() ? "Select a material from the suggestions." : ""
+            );
+            return;
+          }
+          materialInput.setCustomValidity("");
+          renderColourOptions(selectedGroup, preferredVariantId);
+        };
+
+        const initialMaterialId = materialValueInput.value || "";
+        const initialMaterialGroup = materialGroupByVariantId[String(initialMaterialId)];
+        if (initialMaterialGroup) {
+          materialInput.value = initialMaterialGroup.label;
+          syncMaterial(initialMaterialId);
+        } else {
+          syncMaterial("");
+        }
+
+        materialInput.addEventListener("input", () => syncMaterial(""));
+        materialInput.addEventListener("change", () => syncMaterial(""));
+        colourSelect.addEventListener("change", syncColourValue);
+
+        const createOutputRow = (rowData = {}) => {
+          const row = document.createElement("tr");
+
+          const partCell = document.createElement("td");
+          const qtyCell = document.createElement("td");
+          const actionCell = document.createElement("td");
+
+          const partInput = document.createElement("input");
+          partInput.type = "text";
+          partInput.className = "form-control form-control-sm";
+          partInput.setAttribute("list", "markerPartSuggestions");
+          partInput.autocomplete = "off";
+          partInput.placeholder = "Type to search parts";
+
+          const partValueInput = document.createElement("input");
+          partValueInput.type = "hidden";
+          partValueInput.name = "marker_output_part";
+          partValueInput.value = rowData.part || "";
+          if (partValueInput.value && partLabelById[String(partValueInput.value)]) {
+            partInput.value = partLabelById[String(partValueInput.value)];
+          }
+
+          const qtyInput = document.createElement("input");
+          qtyInput.type = "number";
+          qtyInput.name = "marker_output_qty";
+          qtyInput.className = "form-control form-control-sm";
+          qtyInput.min = "0.001";
+          qtyInput.step = "0.001";
+          qtyInput.placeholder = "Qty / set";
+          qtyInput.value = rowData.quantity_per_set || "";
+
+          const removeBtn = document.createElement("button");
+          removeBtn.type = "button";
+          removeBtn.className = "btn btn-sm btn-outline-danger";
+          removeBtn.textContent = "Remove";
+
+          const syncPartSelection = () => {
+            const selected = partOptions.find((option) => option.value === partInput.value.trim());
+            partValueInput.value = selected ? selected.id : "";
+            partInput.setCustomValidity(
+              partInput.value.trim() && !partValueInput.value ? "Select a part from the suggestions." : ""
+            );
+          };
+
+          partInput.addEventListener("input", syncPartSelection);
+          partInput.addEventListener("change", syncPartSelection);
+          removeBtn.addEventListener("click", () => {
+            if (rowsBody.querySelectorAll("tr").length <= 1) {
+              partInput.value = "";
+              partValueInput.value = "";
+              qtyInput.value = "";
+              partInput.setCustomValidity("");
+              qtyInput.setCustomValidity("");
+              return;
+            }
+            row.remove();
+          });
+
+          partCell.appendChild(partInput);
+          partCell.appendChild(partValueInput);
+          qtyCell.appendChild(qtyInput);
+          actionCell.appendChild(removeBtn);
+          row.appendChild(partCell);
+          row.appendChild(qtyCell);
+          row.appendChild(actionCell);
+          rowsBody.appendChild(row);
+        };
+
+        addRowBtn.addEventListener("click", () => createOutputRow({}));
+        if (Array.isArray(markerOutputSeedRows) && markerOutputSeedRows.length) {
+          markerOutputSeedRows.forEach((rowData) => createOutputRow(rowData || {}));
+        } else {
+          createOutputRow({});
+        }
+
+        form.addEventListener("submit", (event) => {
+          syncMaterial(materialValueInput.value || "");
+          syncColourValue();
+          if (!materialValueInput.value) {
+            event.preventDefault();
+            materialInput.reportValidity();
+            return;
+          }
+
+          let firstInvalidInput = null;
+          rowsBody.querySelectorAll("tr").forEach((row) => {
+            const partInput = row.querySelector('input[list="markerPartSuggestions"]');
+            const partValueInput = row.querySelector('input[name="marker_output_part"]');
+            const qtyInput = row.querySelector('input[name="marker_output_qty"]');
+            if (!partInput || !partValueInput || !qtyInput) {
+              return;
+            }
+            const hasAnyValue = !!(partInput.value.trim() || partValueInput.value || qtyInput.value.trim());
+            if (!hasAnyValue) {
+              partInput.setCustomValidity("");
+              qtyInput.setCustomValidity("");
+              return;
+            }
+            const selected = partOptions.find((option) => option.value === partInput.value.trim());
+            partValueInput.value = selected ? selected.id : "";
+            partInput.setCustomValidity(partValueInput.value ? "" : "Select a part from the suggestions.");
+            qtyInput.setCustomValidity(qtyInput.value.trim() ? "" : "Enter qty per set.");
+            if (!firstInvalidInput && !partValueInput.value) {
+              firstInvalidInput = partInput;
+            }
+            if (!firstInvalidInput && !qtyInput.value.trim()) {
+              firstInvalidInput = qtyInput;
+            }
+          });
+          if (firstInvalidInput) {
+            event.preventDefault();
+            firstInvalidInput.reportValidity();
+          }
         });
       })();
     </script>
@@ -817,6 +1237,19 @@
     <script>
       (() => {
         const modalEl = document.getElementById("addPartModal");
+        if (!modalEl) {
+          return;
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })();
+    </script>
+  {% endif %}
+
+  {% if show_add_marker_modal and can_manage %}
+    <script>
+      (() => {
+        const modalEl = document.getElementById("addMarkerModal");
         if (!modalEl) {
           return;
         }

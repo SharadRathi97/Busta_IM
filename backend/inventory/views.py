@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import csv
+import logging
 from io import StringIO
 from decimal import Decimal
+
+logger = logging.getLogger(__name__)
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -18,9 +21,11 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods
 
 from accounts.permissions import INVENTORY_MANAGE_ROLES, INVENTORY_VIEW_ROLES, require_roles, verify_action_password
+from config.view_helpers import build_sort_state, get_sorting
 from partners.models import Partner
 from production.models import (
     FinishedProduct,
+    PartProduction,
     ProductionOrder,
     reject_raw_materials_for_production_order,
     release_raw_materials_for_production_order,
@@ -47,55 +52,23 @@ from .models import (
 )
 
 
-def _get_sorting(sort_key: str, direction: str):
-    sort_map = {
-        "id": "id",
-        "rm_id": "rm_id",
-        "material": "name",
-        "code": "code",
-        "type": "material_type",
-        "colour": "colour",
-        "colour_code": "colour_code",
-        "pantone_number": "pantone_number",
-        "stock": "current_stock",
-        "cost": "cost_per_unit",
-        "reorder": "reorder_level",
-        "suppliers": "supplier_sort",
-        "adjust": "id",
-        "actions": "id",
-    }
-    resolved_key = sort_key if sort_key in sort_map else "material"
-    resolved_direction = direction if direction in {"asc", "desc"} else "asc"
-    order_field = sort_map[resolved_key]
-    if resolved_direction == "desc":
-        order_field = f"-{order_field}"
-    return resolved_key, resolved_direction, order_field
-
-
-def _build_sort_state(active_sort: str, active_direction: str):
-    keys = [
-        "id",
-        "rm_id",
-        "material",
-        "code",
-        "type",
-        "colour",
-        "colour_code",
-        "pantone_number",
-        "stock",
-        "cost",
-        "reorder",
-        "suppliers",
-        "adjust",
-        "actions",
-    ]
-    state: dict[str, dict[str, str | bool]] = {}
-    for key in keys:
-        is_active = key == active_sort
-        next_direction = "desc" if is_active and active_direction == "asc" else "asc"
-        icon = "↑" if is_active and active_direction == "asc" else "↓" if is_active else "↕"
-        state[key] = {"active": is_active, "next": next_direction, "icon": icon}
-    return state
+RM_SORT_MAP = {
+    "id": "id",
+    "rm_id": "rm_id",
+    "material": "name",
+    "code": "code",
+    "type": "material_type",
+    "colour": "colour",
+    "colour_code": "colour_code",
+    "pantone_number": "pantone_number",
+    "stock": "current_stock",
+    "cost": "cost_per_unit",
+    "reorder": "reorder_level",
+    "suppliers": "supplier_sort",
+    "adjust": "id",
+    "actions": "id",
+}
+RM_SORT_KEYS = list(RM_SORT_MAP.keys())
 
 
 def _get_safe_next_url(request) -> str:
@@ -192,51 +165,21 @@ def _build_raw_material_autofill_rows(*, limit: int = 1000) -> list[dict[str, ob
     return rows
 
 
-def _get_mro_sorting(sort_key: str, direction: str):
-    sort_map = {
-        "id": "id",
-        "mro_id": "mro_id",
-        "item": "name",
-        "code": "code",
-        "type": "item_type",
-        "stock": "current_stock",
-        "cost": "cost_per_unit",
-        "reorder": "reorder_level",
-        "location": "location",
-        "supplier": "vendor__name",
-        "adjust": "id",
-        "actions": "id",
-    }
-    resolved_key = sort_key if sort_key in sort_map else "item"
-    resolved_direction = direction if direction in {"asc", "desc"} else "asc"
-    order_field = sort_map[resolved_key]
-    if resolved_direction == "desc":
-        order_field = f"-{order_field}"
-    return resolved_key, resolved_direction, order_field
-
-
-def _build_mro_sort_state(active_sort: str, active_direction: str):
-    keys = [
-        "id",
-        "mro_id",
-        "item",
-        "code",
-        "type",
-        "stock",
-        "cost",
-        "reorder",
-        "location",
-        "supplier",
-        "adjust",
-        "actions",
-    ]
-    state: dict[str, dict[str, str | bool]] = {}
-    for key in keys:
-        is_active = key == active_sort
-        next_direction = "desc" if is_active and active_direction == "asc" else "asc"
-        icon = "↑" if is_active and active_direction == "asc" else "↓" if is_active else "↕"
-        state[key] = {"active": is_active, "next": next_direction, "icon": icon}
-    return state
+MRO_SORT_MAP = {
+    "id": "id",
+    "mro_id": "mro_id",
+    "item": "name",
+    "code": "code",
+    "type": "item_type",
+    "stock": "current_stock",
+    "cost": "cost_per_unit",
+    "reorder": "reorder_level",
+    "location": "location",
+    "supplier": "vendor__name",
+    "adjust": "id",
+    "actions": "id",
+}
+MRO_SORT_KEYS = list(MRO_SORT_MAP.keys())
 
 
 RAW_MATERIAL_CSV_COLUMNS = [
@@ -256,7 +199,13 @@ RAW_MATERIAL_CSV_COLUMNS = [
 ]
 
 
+MAX_CSV_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
 def _read_csv_rows(csv_file):
+    if hasattr(csv_file, "size") and csv_file.size > MAX_CSV_SIZE_BYTES:
+        raise ValidationError("CSV file exceeds the 5 MB size limit.")
+
     try:
         content = csv_file.read().decode("utf-8-sig")
     except UnicodeDecodeError as exc:
@@ -627,6 +576,7 @@ def material_list(request):
                 try:
                     rows = _read_csv_rows(csv_form.cleaned_data["csv_file"])
                     imported_count = _import_raw_materials_from_rows(rows, created_by=request.user)
+                    logger.info("CSV import: %d raw materials processed by user=%s", imported_count, request.user.username)
                     messages.success(request, f"Raw material CSV imported. Processed rows: {imported_count}.")
                     return _redirect_to_next_or_list(request, "inventory:list")
                 except ValidationError as exc:
@@ -674,9 +624,11 @@ def material_list(request):
     elif stock_filter == "healthy":
         materials_qs = materials_qs.filter(current_stock__gt=F("reorder_level"))
 
-    sort_key, sort_direction, order_field = _get_sorting(
+    sort_key, sort_direction, order_field = get_sorting(
         request.GET.get("sort", ""),
         request.GET.get("direction", ""),
+        RM_SORT_MAP,
+        default_key="material",
     )
     materials_qs = materials_qs.annotate(
         supplier_sort=Coalesce(Min("vendor_links__vendor__name"), F("vendor__name"), Value(""))
@@ -691,7 +643,7 @@ def material_list(request):
     if can_manage:
         pending_production_requests = list(
             ProductionOrder.objects.filter(status=ProductionOrder.Status.AWAITING_RM_RELEASE)
-            .select_related("product", "created_by")
+            .select_related("product", "marker", "created_by")
             .prefetch_related("consumptions__material")
             .order_by("-id")
         )
@@ -710,7 +662,7 @@ def material_list(request):
         "variant_rows_seed": variant_rows_seed,
         "sort_key": sort_key,
         "sort_direction": sort_direction,
-        "sort_state": _build_sort_state(sort_key, sort_direction),
+        "sort_state": build_sort_state(RM_SORT_KEYS, sort_key, sort_direction),
         "pending_production_requests": pending_production_requests,
         "material_type_choices": RawMaterial.MaterialType.choices,
         "supplier_choices": suppliers,
@@ -810,6 +762,7 @@ def material_delete(request, material_id: int):
             material.vendor_links.all().delete()
             material.bom_usage.all().delete()
             material.delete()
+        logger.info("Raw material deleted: pk=%s name=%s by user=%s", material_id, material.name, request.user.username)
         messages.success(request, "Raw material deleted.")
     except ProtectedError as exc:
         protected_labels = sorted({obj._meta.verbose_name for obj in exc.protected_objects})
@@ -843,6 +796,7 @@ def adjust_material_stock(request):
             reason=form.cleaned_data["reason"],
             created_by=request.user,
         )
+        logger.info("Stock adjusted: material=%s delta=%s by user=%s", material.pk, form.cleaned_data["delta"], request.user.username)
         messages.success(request, "Stock adjusted.")
     except ValueError as exc:
         messages.error(request, str(exc))
@@ -916,7 +870,7 @@ def parts_inventory_list(request):
     q_filter = request.GET.get("q", "").strip()
     parts_qs = FinishedProduct.objects.filter(item_type=FinishedProduct.ItemType.PART).annotate(
         current_stock=Coalesce("stock_record__current_stock", Value(Decimal("0.000")))
-    )
+    ).prefetch_related("marker_outputs__marker")
     if q_filter:
         parts_qs = parts_qs.filter(
             Q(name__icontains=q_filter) | Q(sku__icontains=q_filter) | Q(colour__icontains=q_filter)
@@ -925,9 +879,15 @@ def parts_inventory_list(request):
     parts_qs = parts_qs.order_by("name", "colour", "sku")
     paginator = Paginator(parts_qs, 25)
     page_obj = paginator.get_page(request.GET.get("page"))
+    part_productions = (
+        PartProduction.objects.select_related("marker", "production_order", "created_by")
+        .prefetch_related("marker__outputs__part")
+        .order_by("-id")[:50]
+    )
 
     context = {
         "items": page_obj.object_list,
+        "part_productions": part_productions,
         "page_obj": page_obj,
         "filter_values": {"q": q_filter},
     }
@@ -1033,9 +993,11 @@ def mro_list(request):
     elif stock_filter == "healthy":
         items_qs = items_qs.filter(current_stock__gt=F("reorder_level"))
 
-    sort_key, sort_direction, order_field = _get_mro_sorting(
+    sort_key, sort_direction, order_field = get_sorting(
         request.GET.get("sort", ""),
         request.GET.get("direction", ""),
+        MRO_SORT_MAP,
+        default_key="item",
     )
     items_qs = items_qs.order_by(order_field, "id")
 
@@ -1054,7 +1016,7 @@ def mro_list(request):
         "show_create_modal": show_create_modal,
         "sort_key": sort_key,
         "sort_direction": sort_direction,
-        "sort_state": _build_mro_sort_state(sort_key, sort_direction),
+        "sort_state": build_sort_state(MRO_SORT_KEYS, sort_key, sort_direction),
         "item_type_choices": MROItem.ItemType.choices,
         "supplier_choices": suppliers,
         "filter_values": {

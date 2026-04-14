@@ -2,10 +2,18 @@ from decimal import Decimal
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 
 from inventory.models import RawMaterial
 
-from .models import BOMItem, FINISHED_PRODUCT_IMAGE_SIZE, FinishedProduct, ProductionOrder
+from .models import (
+    BOMItem,
+    FINISHED_PRODUCT_IMAGE_SIZE,
+    FinishedProduct,
+    Marker,
+    MarkerOutput,
+    ProductionOrder,
+)
 
 
 def _raw_material_base_label(material: RawMaterial) -> str:
@@ -23,6 +31,15 @@ def _raw_material_choice_label(material: RawMaterial) -> str:
 
 def _part_choice_label(part: FinishedProduct) -> str:
     return f"Part - {part.name}{f' [{part.colour}]' if part.colour else ''} ({part.sku})"
+
+
+def marker_material_queryset():
+    return RawMaterial.objects.filter(
+        Q(material_type__in=[RawMaterial.MaterialType.FABRIC, RawMaterial.MaterialType.MESH])
+        | Q(name__icontains="foam")
+        | Q(name__icontains="air mesh")
+        | Q(name__icontains="airmesh")
+    ).order_by("name", "rm_id", "colour", "colour_code", "pantone_number", "id")
 
 
 def _component_value_for_item(item: BOMItem) -> str:
@@ -187,12 +204,47 @@ class FinishedProductForm(forms.ModelForm):
     def clean_sku(self):
         return self.cleaned_data["sku"].upper()
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        prefixed_item_type_name = self.add_prefix("item_type")
+        item_type = (
+            self.data.get(prefixed_item_type_name)
+            if self.is_bound
+            else self.initial.get("item_type")
+        )
+        if item_type == FinishedProduct.ItemType.PART:
+            self.fields["sku"].widget.attrs.update(
+                {
+                    "list": "finishedProductSkuSuggestions",
+                    "autocomplete": "off",
+                    "placeholder": "Type finished product SKU",
+                }
+            )
+
     def clean(self):
         cleaned_data = super().clean()
         item_type = cleaned_data.get("item_type")
+        sku = (cleaned_data.get("sku") or "").strip().upper()
         colour = (cleaned_data.get("colour") or "").strip()
+        if item_type == FinishedProduct.ItemType.FINISHED and sku:
+            duplicate_qs = FinishedProduct.objects.filter(
+                item_type=FinishedProduct.ItemType.FINISHED,
+                sku__iexact=sku,
+            )
+            if self.instance.pk:
+                duplicate_qs = duplicate_qs.exclude(pk=self.instance.pk)
+            if duplicate_qs.exists():
+                self.add_error("sku", "A finished product with this SKU already exists.")
         if item_type == FinishedProduct.ItemType.PART and not colour:
             self.add_error("colour", "Colour is required for parts.")
+        if item_type == FinishedProduct.ItemType.PART and sku:
+            finished_product_exists = FinishedProduct.objects.filter(
+                item_type=FinishedProduct.ItemType.FINISHED,
+                sku__iexact=sku,
+            ).exists()
+            if not finished_product_exists:
+                self.add_error("sku", "Select an existing finished product SKU.")
+        cleaned_data["sku"] = sku
         cleaned_data["colour"] = colour
         return cleaned_data
 
@@ -291,13 +343,140 @@ class BOMCSVUploadForm(forms.Form):
         return csv_file
 
 
+class MarkerForm(forms.ModelForm):
+    class Meta:
+        model = Marker
+        fields = ["marker_id", "material", "colour", "sku_id", "length_per_layer", "sets_per_layer"]
+        labels = {
+            "marker_id": "Marker ID",
+            "sku_id": "Finished Product SKU",
+            "length_per_layer": "Length / Layer",
+            "sets_per_layer": "Sets / Layer",
+        }
+        widgets = {
+            "marker_id": forms.TextInput(attrs={"class": "form-control"}),
+            "material": forms.Select(attrs={"class": "form-select"}),
+            "colour": forms.TextInput(attrs={"class": "form-control"}),
+            "sku_id": forms.TextInput(attrs={"class": "form-control"}),
+            "length_per_layer": forms.NumberInput(attrs={"class": "form-control", "step": "0.001", "min": "0.001"}),
+            "sets_per_layer": forms.NumberInput(attrs={"class": "form-control", "step": "0.001", "min": "0.001"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["material"].queryset = marker_material_queryset()
+        self.fields["material"].label_from_instance = _raw_material_choice_label
+        self.fields["sku_id"].required = True
+        self.fields["sku_id"].widget.attrs.update(
+            {
+                "list": "finishedProductSkuSuggestions",
+                "autocomplete": "off",
+                "placeholder": "Type finished product SKU",
+            }
+        )
+
+    def clean_marker_id(self):
+        return self.cleaned_data["marker_id"].strip().upper()
+
+    def clean_sku_id(self):
+        sku_id = (self.cleaned_data.get("sku_id") or "").strip().upper()
+        if not sku_id:
+            raise ValidationError("SKU ID is required.")
+        if not FinishedProduct.objects.filter(
+            item_type=FinishedProduct.ItemType.FINISHED,
+            sku__iexact=sku_id,
+        ).exists():
+            raise ValidationError("Select an existing finished product SKU.")
+        return sku_id
+
+    def clean_colour(self):
+        return (self.cleaned_data.get("colour") or "").strip()
+
+
+class MarkerOutputForm(forms.ModelForm):
+    class Meta:
+        model = MarkerOutput
+        fields = ["part", "quantity_per_set"]
+        labels = {
+            "quantity_per_set": "Qty / Set",
+        }
+        widgets = {
+            "part": forms.Select(attrs={"class": "form-select form-select-sm"}),
+            "quantity_per_set": forms.NumberInput(
+                attrs={"class": "form-control form-control-sm", "step": "0.001", "min": "0.001"}
+            ),
+        }
+
+    def __init__(self, *args, marker: Marker, **kwargs):
+        self.marker = marker
+        super().__init__(*args, **kwargs)
+        used_part_ids = MarkerOutput.objects.filter(marker=marker).values_list("part_id", flat=True)
+        self.fields["part"].queryset = (
+            FinishedProduct.objects.filter(item_type=FinishedProduct.ItemType.PART)
+            .exclude(id__in=used_part_ids)
+            .order_by("name", "colour", "sku")
+        )
+        self.fields["part"].label_from_instance = _part_choice_label
+
+    def clean_part(self):
+        part = self.cleaned_data["part"]
+        if part.item_type != FinishedProduct.ItemType.PART:
+            raise ValidationError("Marker outputs must be parts.")
+        if MarkerOutput.objects.filter(marker=self.marker, part=part).exists():
+            raise ValidationError("This part is already mapped to the marker.")
+        return part
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.marker = self.marker
+        if commit:
+            instance.save()
+        return instance
+
+
 class ProductionOrderCreateForm(forms.Form):
-    product = forms.ModelChoiceField(
-        queryset=FinishedProduct.objects.order_by("item_type", "name"),
+    order_type = forms.ChoiceField(
+        choices=ProductionOrder.TargetType.choices,
+        initial=ProductionOrder.TargetType.FINISHED_PRODUCT,
+        required=False,
         widget=forms.Select(attrs={"class": "form-select"}),
     )
-    quantity = forms.IntegerField(min_value=1, widget=forms.NumberInput(attrs={"class": "form-control", "min": "1"}))
+    product = forms.ModelChoiceField(
+        queryset=FinishedProduct.objects.filter(item_type=FinishedProduct.ItemType.FINISHED).order_by("name"),
+        required=False,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    marker = forms.ModelChoiceField(
+        queryset=Marker.objects.order_by("marker_id"),
+        required=False,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    quantity = forms.IntegerField(
+        label="Quantity / Sets",
+        min_value=1,
+        widget=forms.NumberInput(attrs={"class": "form-control", "min": "1"}),
+    )
     notes = forms.CharField(required=False, max_length=255, widget=forms.TextInput(attrs={"class": "form-control"}))
+
+    def clean(self):
+        cleaned_data = super().clean()
+        order_type = cleaned_data.get("order_type") or ProductionOrder.TargetType.FINISHED_PRODUCT
+        product = cleaned_data.get("product")
+        marker = cleaned_data.get("marker")
+
+        if order_type == ProductionOrder.TargetType.FINISHED_PRODUCT:
+            if not product:
+                self.add_error("product", "Select a finished product.")
+            cleaned_data["marker"] = None
+            return cleaned_data
+
+        if order_type == ProductionOrder.TargetType.MARKER:
+            if not marker:
+                self.add_error("marker", "Select a marker.")
+            cleaned_data["product"] = None
+            return cleaned_data
+
+        raise ValidationError("Select a valid production order type.")
 
 
 class ProductionStatusForm(forms.Form):
@@ -333,4 +512,59 @@ class ProductionStatusForm(forms.Form):
         else:
             cleaned_data["scrap_qty"] = scrap_qty if scrap_qty is not None else Decimal("0")
 
+        return cleaned_data
+
+
+class PartProductionCompletionForm(forms.Form):
+    order_id = forms.IntegerField(widget=forms.HiddenInput())
+    actual_length = forms.DecimalField(
+        min_value=Decimal("0.001"),
+        decimal_places=3,
+        max_digits=12,
+        widget=forms.NumberInput(attrs={"class": "form-control form-control-sm", "step": "0.001", "min": "0.001"}),
+    )
+    actual_layers = forms.IntegerField(
+        min_value=1,
+        widget=forms.NumberInput(attrs={"class": "form-control form-control-sm", "min": "1"}),
+    )
+    actual_sets_per_layer = forms.DecimalField(
+        min_value=Decimal("0.001"),
+        decimal_places=3,
+        max_digits=12,
+        widget=forms.NumberInput(attrs={"class": "form-control form-control-sm", "step": "0.001", "min": "0.001"}),
+    )
+    total_sets = forms.DecimalField(
+        min_value=Decimal("0.001"),
+        decimal_places=3,
+        max_digits=12,
+        widget=forms.NumberInput(attrs={"class": "form-control form-control-sm", "step": "0.001", "min": "0.001"}),
+    )
+    actual_fabric_issued = forms.DecimalField(
+        min_value=Decimal("0.001"),
+        decimal_places=3,
+        max_digits=12,
+        widget=forms.NumberInput(attrs={"class": "form-control form-control-sm", "step": "0.001", "min": "0.001"}),
+    )
+    good_sets = forms.DecimalField(
+        min_value=Decimal("0"),
+        decimal_places=3,
+        max_digits=12,
+        widget=forms.NumberInput(attrs={"class": "form-control form-control-sm", "step": "0.001", "min": "0"}),
+    )
+    rejected_sets = forms.DecimalField(
+        min_value=Decimal("0"),
+        decimal_places=3,
+        max_digits=12,
+        widget=forms.NumberInput(attrs={"class": "form-control form-control-sm", "step": "0.001", "min": "0"}),
+    )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        total_sets = cleaned_data.get("total_sets")
+        good_sets = cleaned_data.get("good_sets")
+        rejected_sets = cleaned_data.get("rejected_sets")
+        if total_sets is None or good_sets is None or rejected_sets is None:
+            return cleaned_data
+        if (good_sets + rejected_sets).quantize(Decimal("0.001")) != total_sets:
+            raise ValidationError("Good sets plus rejected sets must equal total sets.")
         return cleaned_data

@@ -30,6 +30,7 @@ class RawMaterialCostTests(TestCase):
         )
         self.vendor = Partner.objects.create(
             name="Cost Vendor",
+            vendor_id="VEND-TEST-001",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE5678F1Z5",
             address_line1="Warehouse Lane",
@@ -597,6 +598,7 @@ class RawMaterialCostTests(TestCase):
         self.client.force_login(self.user)
         additional_supplier = Partner.objects.create(
             name="Additional Supplier",
+            vendor_id="VEND-TEST-002",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE5678F2Z5",
             address_line1="Supplier Lane",
@@ -648,6 +650,7 @@ class RawMaterialCostTests(TestCase):
         self.client.force_login(self.user)
         new_supplier = Partner.objects.create(
             name="New Supplier",
+            vendor_id="VEND-TEST-003",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE5678F3Z5",
             address_line1="Supplier Street",
@@ -879,6 +882,7 @@ class RawMaterialCostTests(TestCase):
         self.client.force_login(self.user)
         extra_vendor = Partner.objects.create(
             name="Extra Supplier",
+            vendor_id="VEND-TEST-004",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE5678F1Z6",
             address_line1="Warehouse Street",
@@ -921,6 +925,7 @@ class MROInventoryFlowTests(TestCase):
         )
         self.vendor = Partner.objects.create(
             name="MRO Supplier",
+            vendor_id="VEND-TEST-005",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE1111F1Z5",
             address_line1="MRO Zone",
@@ -1136,6 +1141,7 @@ class ProductionRMRequestInventoryActionTests(TestCase):
         )
         self.vendor = Partner.objects.create(
             name="RM Request Supplier",
+            vendor_id="VEND-TEST-006",
             partner_type=Partner.PartnerType.SUPPLIER,
             gst_number="29ABCDE2222F1Z5",
             address_line1="Store Yard",
