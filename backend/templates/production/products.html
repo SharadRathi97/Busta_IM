@@ -141,8 +141,17 @@
 
 <div class="card card-soft mt-3">
   <div class="card-body">
-    <h2 class="h5">Markers</h2>
-    <div class="table-meta mb-2">Output parts are selected when a marker is created.</div>
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+      <div>
+        <h2 class="h5 mb-1">Markers</h2>
+        <div class="table-meta">Output parts are selected when a marker is created.</div>
+      </div>
+      {% if can_manage %}
+        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#addMarkerModal">
+          Add Marker
+        </button>
+      {% endif %}
+    </div>
     <div class="table-shell">
       <div class="table-responsive">
         <table class="table table-sm table-minimal table-col-separators align-middle mb-0">
